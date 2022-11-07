@@ -1,4 +1,4 @@
-import { mat4, vec2, vec3 } from "gl-matrix";
+import { mat4, vec2, vec3, vec4 } from "gl-matrix";
 import { filter, fromEvent, merge, throwIfEmpty } from "rxjs";
 import * as twgl from "twgl.js";
 
@@ -82,7 +82,9 @@ export class Sketch {
         this.isDev = isDev;
         this.pane = pane;
 
-        this.#init();
+        this.#init().then(() => {
+            if (this.onInit) this.onInit(this)
+        });
     }
 
     run(time = 0) {
@@ -92,9 +94,7 @@ export class Sketch {
         this.#frames += this.#deltaFrames;
 
         this.#animate(this.#deltaTime);
-        if (this.beadVAO) {
-            this.#render();
-        }
+        this.#render();
 
         requestAnimationFrame((t) => this.run(t));
     }
@@ -123,7 +123,7 @@ export class Sketch {
         this.#updateProjectionMatrix(gl);
     }
 
-    #init() {
+    async #init() {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
         /** @type {WebGLRenderingContext} */
@@ -158,17 +158,15 @@ export class Sketch {
         this.quadVAO = twgl.createVAOAndSetAttributes(gl, this.pressurePrg.attribSetters, this.quadBufferInfo.attribs, this.quadBufferInfo.indices);
 
         this.glbBuilder = new GLBBuilder(gl);
-        this.glbBuilder.load(new URL('../assets/bead.glb', import.meta.url)).then(() => {
-            this.beadPrimitive = this.glbBuilder.getPrimitiveDataByMeshName('bead');
-            this.beadBuffers = this.beadPrimitive.buffers;
-            console.log(this.beadBuffers);
-            this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, { 
-                a_position: {...this.beadBuffers.vertices, numComponents: this.beadBuffers.vertices.numberOfComponents},
-                a_normal: {...this.beadBuffers.normals, numComponents: this.beadBuffers.normals.numberOfComponents},
-                indices: {...this.beadBuffers.indices, numComponents: this.beadBuffers.indices.numberOfComponents}
-            });
-            this.beadVAO = twgl.createVAOAndSetAttributes(gl, this.beadPrg.attribSetters, this.beadBufferInfo.attribs, this.beadBufferInfo.indices);
+        await this.glbBuilder.load(new URL('../assets/bead.glb', import.meta.url));
+        this.beadPrimitive = this.glbBuilder.getPrimitiveDataByMeshName('bead');
+        this.beadBuffers = this.beadPrimitive.buffers;
+        this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, { 
+            a_position: {...this.beadBuffers.vertices, numComponents: this.beadBuffers.vertices.numberOfComponents},
+            a_normal: {...this.beadBuffers.normals, numComponents: this.beadBuffers.normals.numberOfComponents},
+            indices: {...this.beadBuffers.indices, numComponents: this.beadBuffers.indices.numberOfComponents}
         });
+        this.beadVAO = twgl.createVAOAndSetAttributes(gl, this.beadPrg.attribSetters, this.beadBufferInfo.attribs, this.beadBufferInfo.indices);
 
         // Setup Framebuffers
         this.pressureFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.densityPressure}], this.textureSize, this.textureSize);
@@ -188,8 +186,6 @@ export class Sketch {
         this.#updateProjectionMatrix(gl);
 
         this.resize();
-        
-        if (this.onInit) this.onInit(this);
     }
 
     #initEvents() {
@@ -218,6 +214,10 @@ export class Sketch {
             //filter(() => this.isPointerDown)
         ).subscribe((e) => {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
+            if (!this.arcPointer) {
+                this.arcPointer = this.#projectArcBall(this.pointer);
+                vec3.copy(this.arcPointerPrev, this.arcPointer);
+            }
         });
 
         fromEvent(window.document, 'keyup').subscribe(() => this.debugKey = true);
@@ -639,16 +639,22 @@ export class Sketch {
         gl.enable(gl.DEPTH_TEST);
         gl.clearColor(0., 0., 0., 1.);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.blendFunc(gl.SRC_ALPHA, gl.DST_ALPHA);
-
         gl.useProgram(this.beadPrg.program);
         twgl.setUniforms(this.beadPrg, {
             u_worldMatrix: this.worldMatrix,
             u_viewMatrix: this.camera.matrices.view,
-            u_projectionMatrix: this.camera.matrices.projection
+            u_projectionMatrix: this.camera.matrices.projection,
+            u_positionTexture: this.currentPositionTexture,
+            u_velocityTexture: this.currentVelocityTexture,
         });
         gl.bindVertexArray(this.beadVAO);
-        gl.drawElements(gl.TRIANGLES, this.beadBufferInfo.numElements, gl.UNSIGNED_SHORT, 0);
+        gl.drawElementsInstanced(
+            gl.TRIANGLES,
+            this.beadBufferInfo.numElements,
+            gl.UNSIGNED_SHORT,
+            0,
+            this.NUM_PARTICLES
+        );
     }
 
     #updateCameraMatrix() {

@@ -16,6 +16,9 @@ import sortVert from './shader/sph/sort.vert.glsl';
 import sortFrag from './shader/sph/sort.frag.glsl';
 import offsetVert from './shader/sph/offset.vert.glsl';
 import offsetFrag from './shader/sph/offset.frag.glsl';
+import beadVert from './shader/bead.vert.glsl';
+import beadFrag from './shader/bead.frag.glsl';
+import { GLBBuilder } from "./utils/glb-builder";
 
 export class Sketch {
 
@@ -37,8 +40,8 @@ export class Sketch {
         H: 1, // kernel radius
         MASS: 1, // particle mass
         REST_DENS: 1.5, // rest density
-        GAS_CONST: 80, // gas constant
-        VISC: 1.5, // viscosity constant
+        GAS_CONST: 200, // gas constant
+        VISC: 18.5, // viscosity constant
 
         // these are calculated from the above constants
         POLY6: 0,
@@ -54,7 +57,7 @@ export class Sketch {
 
     pointerParams = {
         RADIUS: .5,
-        STRENGTH: 9,
+        STRENGTH: 20,
     }
 
     camera = {
@@ -89,7 +92,9 @@ export class Sketch {
         this.#frames += this.#deltaFrames;
 
         this.#animate(this.#deltaTime);
-        this.#render();
+        if (this.beadVAO) {
+            this.#render();
+        }
 
         requestAnimationFrame((t) => this.run(t));
     }
@@ -141,6 +146,7 @@ export class Sketch {
         this.indicesPrg = twgl.createProgramInfo(gl, [indicesVert, indicesFrag]);
         this.sortPrg = twgl.createProgramInfo(gl, [sortVert, sortFrag]);
         this.offsetPrg = twgl.createProgramInfo(gl, [offsetVert, offsetFrag]);
+        this.beadPrg = twgl.createProgramInfo(gl, [beadVert, beadFrag]);
 
         // Setup uinform blocks
         this.simulationParamsUBO = twgl.createUniformBlockInfo(gl, this.pressurePrg, 'u_SimulationParams');
@@ -150,6 +156,19 @@ export class Sketch {
         // Setup Meshes
         this.quadBufferInfo = twgl.createBufferInfoFromArrays(gl, { a_position: { numComponents: 2, data: [-1, -1, 3, -1, -1, 3] }});
         this.quadVAO = twgl.createVAOAndSetAttributes(gl, this.pressurePrg.attribSetters, this.quadBufferInfo.attribs, this.quadBufferInfo.indices);
+
+        this.glbBuilder = new GLBBuilder(gl);
+        this.glbBuilder.load(new URL('../assets/bead.glb', import.meta.url)).then(() => {
+            this.beadPrimitive = this.glbBuilder.getPrimitiveDataByMeshName('bead');
+            this.beadBuffers = this.beadPrimitive.buffers;
+            console.log(this.beadBuffers);
+            this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, { 
+                a_position: {...this.beadBuffers.vertices, numComponents: this.beadBuffers.vertices.numberOfComponents},
+                a_normal: {...this.beadBuffers.normals, numComponents: this.beadBuffers.normals.numberOfComponents},
+                indices: {...this.beadBuffers.indices, numComponents: this.beadBuffers.indices.numberOfComponents}
+            });
+            this.beadVAO = twgl.createVAOAndSetAttributes(gl, this.beadPrg.attribSetters, this.beadBufferInfo.attribs, this.beadBufferInfo.indices);
+        });
 
         // Setup Framebuffers
         this.pressureFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.densityPressure}], this.textureSize, this.textureSize);
@@ -196,7 +215,7 @@ export class Sketch {
             fromEvent(this.canvas, 'pointerleave')
         ).subscribe(() => this.isPointerDown = false);
         fromEvent(this.canvas, 'pointermove').pipe(
-            filter(() => this.isPointerDown)
+            //filter(() => this.isPointerDown)
         ).subscribe((e) => {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
         });
@@ -591,7 +610,7 @@ export class Sketch {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
-        twgl.bindFramebufferInfo(gl, null);
+        /*twgl.bindFramebufferInfo(gl, null);
         gl.disable(gl.CULL_FACE);
         gl.disable(gl.DEPTH_TEST);
         gl.clearColor(0., 0., 0., 1.);
@@ -613,7 +632,23 @@ export class Sketch {
             u_cameraPosition: this.camera.position,
         });
         gl.drawArrays(gl.POINTS, 0, this.NUM_PARTICLES);
-        gl.disable(gl.BLEND);
+        gl.disable(gl.BLEND);*/
+
+        twgl.bindFramebufferInfo(gl, null);
+        gl.enable(gl.CULL_FACE);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clearColor(0., 0., 0., 1.);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.blendFunc(gl.SRC_ALPHA, gl.DST_ALPHA);
+
+        gl.useProgram(this.beadPrg.program);
+        twgl.setUniforms(this.beadPrg, {
+            u_worldMatrix: this.worldMatrix,
+            u_viewMatrix: this.camera.matrices.view,
+            u_projectionMatrix: this.camera.matrices.projection
+        });
+        gl.bindVertexArray(this.beadVAO);
+        gl.drawElements(gl.TRIANGLES, this.beadBufferInfo.numElements, gl.UNSIGNED_SHORT, 0);
     }
 
     #updateCameraMatrix() {

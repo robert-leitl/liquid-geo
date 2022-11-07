@@ -108,8 +108,8 @@ void main() {
     vi *= 0.99;
 
     // add noise
-    vec3 n = curlNoise(pi.xyz * 2.75) * 2. - 1.;
-    vi.xyz += n * 0.003;
+    vec3 n = curlNoise(pi.xyz * 2.5 + sin(u_time * 0.00001) * 2.) * 2. - 1.;
+    vi.xyz += n * 0.01;
     
 
     outPosition = pi;

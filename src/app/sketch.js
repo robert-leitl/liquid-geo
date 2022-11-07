@@ -1,4 +1,4 @@
-import { vec2 } from "gl-matrix";
+import { mat4, vec2, vec3 } from "gl-matrix";
 import { filter, fromEvent, merge, throwIfEmpty } from "rxjs";
 import * as twgl from "twgl.js";
 
@@ -31,14 +31,14 @@ export class Sketch {
     NUM_PARTICLES = 500;
 
     // the domain scale factor compresses the field to make a dense particle area
-    DOMAIN_SCALE_FACTOR = 4;
+    DOMAIN_SCALE_FACTOR = 1;
 
     simulationParams = {
         H: 1, // kernel radius
         MASS: 1, // particle mass
-        REST_DENS: 1.8, // rest density
-        GAS_CONST: 40, // gas constant
-        VISC: 5.5, // viscosity constant
+        REST_DENS: 1.5, // rest density
+        GAS_CONST: 80, // gas constant
+        VISC: 1.5, // viscosity constant
 
         // these are calculated from the above constants
         POLY6: 0,
@@ -53,9 +53,25 @@ export class Sketch {
     };
 
     pointerParams = {
-        RADIUS: 3,
-        STRENGTH: 6,
+        RADIUS: .5,
+        STRENGTH: 9,
     }
+
+    camera = {
+        matrix: mat4.create(),
+        near: .1,
+        far: 8,
+        fov: Math.PI / 3,
+        aspect: 1,
+        position: vec3.fromValues(0, .5, 3),
+        up: vec3.fromValues(0, 1, 0),
+        matrices: {
+            view: mat4.create(),
+            projection: mat4.create(),
+            inversProjection: mat4.create(),
+            inversViewProjection: mat4.create()
+        }
+    };
 
     constructor(canvasElm, onInit = null, isDev = false, pane = null) {
         this.canvas = canvasElm;
@@ -89,11 +105,7 @@ export class Sketch {
         );
 
         // the domain scale reflects the aspect ratio within the simulation
-        this.domainScale = vec2.copy(vec2.create(), this.viewportSize);
-        const maxSize = Math.max(this.domainScale[0], this.domainScale[1]) * 1.;
-        this.domainScale[0] /= maxSize;
-        this.domainScale[1] /= maxSize;
-        vec2.scale(this.domainScale, this.domainScale, (this.textureSize * this.simulationParams.H) / this.DOMAIN_SCALE_FACTOR)
+        this.domainScale = vec3.fromValues(this.DOMAIN_SCALE_FACTOR, this.DOMAIN_SCALE_FACTOR, this.DOMAIN_SCALE_FACTOR);
         this.simulationParams.DOMAIN_SCALE = this.domainScale;
         this.simulationParamsNeedUpdate = true;
 
@@ -102,6 +114,8 @@ export class Sketch {
         if (needsResize) {
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
         }
+
+        this.#updateProjectionMatrix(gl);
     }
 
     #init() {
@@ -146,9 +160,13 @@ export class Sketch {
         this.indices2FBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.indices2}], this.textureSize, this.textureSize);
         this.offsetFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.offset}], this.cellSideCount, this.cellSideCount);
 
+        this.worldMatrix = mat4.create();
+
         this.#initEvents();
         this.#updateSimulationParams();
         this.#initTweakpane();
+        this.#updateCameraMatrix();
+        this.#updateProjectionMatrix(gl);
 
         this.resize();
         
@@ -161,12 +179,17 @@ export class Sketch {
         this.pointerLerp = vec2.create();
         this.pointerLerpPrev = vec2.create();
         this.pointerLerpDelta = vec2.create();
+        this.arcPointer = vec3.create();
+        this.arcPointerPrev = vec3.create();
+        this.arcPointerDelta = vec3.create();
 
         fromEvent(this.canvas, 'pointerdown').subscribe((e) => {
             this.isPointerDown = true;
-            this.pointer = this.#getNormalizedPointerCoords(e);
+            this.pointer = vec2.fromValues(e.clientX, e.clientY);
             vec2.copy(this.pointerLerp, this.pointer);
             vec2.copy(this.pointerLerpPrev, this.pointerLerp);
+            this.arcPointer = this.#projectArcBall(this.pointerLerp);
+            vec3.copy(this.arcPointerPrev, this.arcPointer);
         });
         merge(
             fromEvent(this.canvas, 'pointerup'),
@@ -175,7 +198,7 @@ export class Sketch {
         fromEvent(this.canvas, 'pointermove').pipe(
             filter(() => this.isPointerDown)
         ).subscribe((e) => {
-            this.pointer = this.#getNormalizedPointerCoords(e);
+            this.pointer = vec2.fromValues(e.clientX, e.clientY);
         });
 
         fromEvent(window.document, 'keyup').subscribe(() => this.debugKey = true);
@@ -229,8 +252,12 @@ export class Sketch {
         for(let i=0; i<this.NUM_PARTICLES; ++i) {
             initVelocities[i * 4 + 0] = 0;
             initVelocities[i * 4 + 1] = 0;
-            initPositions[i * 4 + 0] = Math.random() * 1.9 - .95;
-            initPositions[i * 4 + 1] = Math.random() * 1.9 - .95;
+            let pos = vec3.fromValues(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
+            pos = vec3.normalize(pos, pos);
+            initPositions[i * 4 + 0] = pos[0];
+            initPositions[i * 4 + 1] = pos[1];
+            initPositions[i * 4 + 2] = pos[2];
+            initPositions[i * 4 + 3] = 0;
         }
 
         // empty offset texture
@@ -319,6 +346,10 @@ export class Sketch {
         this.pointerLerp[0] += (this.pointer[0] - this.pointerLerp[0]) / 5;
         this.pointerLerp[1] += (this.pointer[1] - this.pointerLerp[1]) / 5;
 
+        this.arcPointer = this.#projectArcBall(this.pointerLerp);
+        this.arcPointerDelta = vec3.subtract(this.arcPointerDelta, this.arcPointer, this.arcPointerPrev);
+        vec3.copy(this.arcPointerPrev, this.arcPointer);
+
         vec2.subtract(this.pointerLerpDelta, this.pointerLerp, this.pointerLerpPrev);
         vec2.copy(this.pointerLerpPrev, this.pointerLerp);
     }
@@ -380,9 +411,8 @@ export class Sketch {
             u_velocityTexture: this.inFBO.attachments[1],
             u_forceTexture: this.forceFBO.attachments[0],
             u_densityPressureTexture: this.pressureFBO.attachments[0],
-            u_pointerPos: this.pointerLerp,
-            u_pointerVelocity: this.pointerLerpDelta,
             u_dt: deltaTime,
+            u_time: this.#time,
             u_domainScale: this.domainScale
         });
         twgl.setBlockUniforms(
@@ -390,8 +420,8 @@ export class Sketch {
             {
                 pointerRadius: this.pointerParams.RADIUS,
                 pointerStrength: this.pointerParams.STRENGTH,
-                pointerPos: this.pointerLerp,
-                pointerVelocity: this.pointerLerpDelta
+                pointerPos: this.arcPointer,
+                pointerVelocity: this.arcPointerDelta
             } 
         );
         twgl.setUniformBlock(gl, this.integratePrg, this.pointerParamsUBO);
@@ -577,8 +607,65 @@ export class Sketch {
             u_cellTexSize: [this.cellSideCount, this.cellSideCount],
             u_cellSize: this.simulationParams.H,
             u_domainScale: this.domainScale,
+            u_worldMatrix: this.worldMatrix,
+            u_viewMatrix: this.camera.matrices.view,
+            u_projectionMatrix: this.camera.matrices.projection,
+            u_cameraPosition: this.camera.position,
         });
         gl.drawArrays(gl.POINTS, 0, this.NUM_PARTICLES);
         gl.disable(gl.BLEND);
+    }
+
+    #updateCameraMatrix() {
+        mat4.targetTo(this.camera.matrix, this.camera.position, [0, 0, 0], this.camera.up);
+        mat4.invert(this.camera.matrices.view, this.camera.matrix);
+    }
+
+    #updateProjectionMatrix(gl) {
+        this.camera.aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+
+        const height = 2.;
+        const distance = this.camera.position[2];
+        if (this.camera.aspect > 1) {
+            this.camera.fov = 2 * Math.atan( height / distance );
+        } else {
+            this.camera.fov = 2 * Math.atan( (height / this.camera.aspect) / distance );
+        }
+
+        mat4.perspective(this.camera.matrices.projection, this.camera.fov, this.camera.aspect, this.camera.near, this.camera.far);
+        mat4.invert(this.camera.matrices.inversProjection, this.camera.matrices.projection);
+        mat4.multiply(this.camera.matrices.inversViewProjection, this.camera.matrix, this.camera.matrices.inversProjection)
+    }
+
+    /**
+     * Maps pointer coordinates to canonical coordinates [-1, 1] 
+     * and projects them onto the arcball surface or onto a 
+     * hyperbolical function outside the arcball.
+     * 
+     * @return vec3 The arcball coords
+     * 
+     * @see https://www.xarg.org/2021/07/trackball-rotation-using-quaternions/
+     */
+     #projectArcBall(pos) {
+        const r = 1; // arcball radius
+        const w = this.viewportSize[0];
+        const h = this.viewportSize[1];
+        const s = Math.max(w, h) - 1;
+
+        // map to -1 to 1
+        let x = (2 * pos[0] - w - 1) / s;
+        let y = (2 * pos[1] - h - 1) / s;
+        x *= 2;
+        y *= 2;
+        let z = 0;
+        const xySq = x * x + y * y;
+        const rSq = r * r;
+
+        if (xySq <= rSq / 2)
+            z = Math.sqrt(rSq - xySq);
+        else
+            z = (rSq / 2) / Math.sqrt(xySq); // hyperbolical function
+
+        return vec3.fromValues(x, -y, z);
     }
 }

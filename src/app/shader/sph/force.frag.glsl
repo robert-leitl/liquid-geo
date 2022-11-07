@@ -25,7 +25,7 @@ layout(std140) uniform u_SimulationParams {
     float POINTER_RADIUS;
     float POINTER_STRENGTH;
     int PARTICLE_COUNT;
-    vec2 DOMAIN_SCALE;
+    vec3 DOMAIN_SCALE;
     ivec2 CELL_TEX_SIZE;
     float CELL_SIZE;
 };
@@ -47,7 +47,7 @@ float visc_laplWeight(float r) {
 
 void main() {
     ivec2 particleTexDimensions = textureSize(u_positionTexture, 0);
-    vec4 domainScale = vec4(DOMAIN_SCALE, 0., 0.);
+    vec4 domainScale = vec4(DOMAIN_SCALE, 0.);
     int emptyOffsetValue = PARTICLE_COUNT * PARTICLE_COUNT;
     int cellCount = CELL_TEX_SIZE.x * CELL_TEX_SIZE.y;
 
@@ -121,14 +121,18 @@ void main() {
         ivec2 pj_tex = ndx2tex(particleTexDimensions, i);
         vec4 pj = texelFetch(u_positionTexture, pj_tex, 0) * domainScale;
         vec4 pij = pj - pi;
-        float r2 = dot(pij, pij);
 
-        if (r2 < HSQ) {
-            float r = sqrt(r2);
+        vec3 b = cross(pj.xyz, pi.xyz);
+        vec3 t = cross(pi.xyz, b);
+
+        float sr = sphericalDistance(pi.xyz, pj.xyz);
+
+        if (sr < H) {
+            float r = sr;
 
             if (r == 0.) continue;
 
-            vec4 pressureForce = vec4(pij);
+            vec4 pressureForce = vec4(t, 0.);
             vec4 viscosityForce = vec4(0.);
 
             vec2 rj = texelFetch(u_densityPressureTexture, pj_tex, 0).xy;
@@ -148,7 +152,7 @@ void main() {
     }
 
     // compute boundary forces
-    float h = H;
+    /*float h = H;
     float scale = 1.;
     vec2 minBound = -domainScale.xy * scale;
     vec2 maxBound = domainScale.xy * scale;
@@ -167,7 +171,7 @@ void main() {
     } else if (pi.y > maxBound.y - h) {
         float r = maxBound.y - pi.y;
         force.y += f * spiky_grad2Weight(r) * r;
-    }
+    }*/
 
     outForce = vec4(force);
 }

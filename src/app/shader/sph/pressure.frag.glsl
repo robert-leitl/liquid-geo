@@ -22,7 +22,7 @@ layout(std140) uniform u_SimulationParams {
     float POINTER_RADIUS;
     float POINTER_STRENGTH;
     int PARTICLE_COUNT;
-    vec2 DOMAIN_SCALE;
+    vec3 DOMAIN_SCALE;
     ivec2 CELL_TEX_SIZE;
     float CELL_SIZE;
 };
@@ -40,7 +40,7 @@ float poly6Weight(float r2) {
 
 void main() {
     ivec2 particleTexDimensions = textureSize(u_positionTexture, 0);
-    vec4 domainScale = vec4(DOMAIN_SCALE, 0., 0.);
+    vec4 domainScale = vec4(DOMAIN_SCALE, 0.);
     int emptyOffsetValue = PARTICLE_COUNT * PARTICLE_COUNT;
     int cellCount = CELL_TEX_SIZE.x * CELL_TEX_SIZE.y;
 
@@ -89,9 +89,9 @@ void main() {
     // loop over all other particles
     for(int i=0; i<PARTICLE_COUNT; i++) {
         vec4 pj = texelFetch(u_positionTexture, ndx2tex(particleTexDimensions, i), 0) * domainScale;
-        vec4 pij = pj - pi;
 
-        float r2 = dot(pij, pij);
+        float sr = sphericalDistance(pi.xyz, pj.xyz);
+        float r2 = sr * sr;
         if (r2 < HSQ) {
             float t = MASS * poly6Weight(r2);
             rho += t;

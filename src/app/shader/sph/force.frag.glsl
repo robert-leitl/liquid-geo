@@ -130,7 +130,7 @@ void main() {
         if (sr < H) {
             float r = sr;
 
-            if (r == 0.) continue;
+            if (r <= 0.0001) continue;
 
             vec4 pressureForce = vec4(t, 0.);
             vec4 viscosityForce = vec4(0.);

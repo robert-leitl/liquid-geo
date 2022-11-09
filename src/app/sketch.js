@@ -10,12 +10,6 @@ import pressureVert from './shader/sph/pressure.vert.glsl';
 import pressureFrag from './shader/sph/pressure.frag.glsl';
 import forceVert from './shader/sph/force.vert.glsl';
 import forceFrag from './shader/sph/force.frag.glsl';
-import indicesVert from './shader/sph/indices.vert.glsl';
-import indicesFrag from './shader/sph/indices.frag.glsl';
-import sortVert from './shader/sph/sort.vert.glsl';
-import sortFrag from './shader/sph/sort.frag.glsl';
-import offsetVert from './shader/sph/offset.vert.glsl';
-import offsetFrag from './shader/sph/offset.frag.glsl';
 import beadVert from './shader/bead.vert.glsl';
 import beadFrag from './shader/bead.frag.glsl';
 import { GLBBuilder } from "./utils/glb-builder";
@@ -33,14 +27,11 @@ export class Sketch {
     // particle constants
     NUM_PARTICLES = 500;
 
-    // the domain scale factor compresses the field to make a dense particle area
-    DOMAIN_SCALE_FACTOR = 1;
-
     simulationParams = {
         H: 1, // kernel radius
         MASS: 1, // particle mass
         REST_DENS: 1.5, // rest density
-        GAS_CONST: 200, // gas constant
+        GAS_CONST: 400, // gas constant
         VISC: 18.5, // viscosity constant
 
         // these are calculated from the above constants
@@ -50,23 +41,23 @@ export class Sketch {
         VISC_LAP: 0,
 
         PARTICLE_COUNT: 0,
-        DOMAIN_SCALE: 0,
+        DOMAIN_SCALE: vec4.fromValues(1, 1, 1, 1),
 
         STEPS: 0
     };
 
     pointerParams = {
-        RADIUS: .5,
-        STRENGTH: 20,
+        RADIUS: .65,
+        STRENGTH: 15,
     }
 
     camera = {
         matrix: mat4.create(),
         near: .1,
-        far: 8,
+        far: 6,
         fov: Math.PI / 3,
         aspect: 1,
-        position: vec3.fromValues(0, .5, 3),
+        position: vec3.fromValues(0, 0, 6),
         up: vec3.fromValues(0, 1, 0),
         matrices: {
             view: mat4.create(),
@@ -109,11 +100,6 @@ export class Sketch {
             this.canvas.clientHeight
         );
 
-        // the domain scale reflects the aspect ratio within the simulation
-        this.domainScale = vec3.fromValues(this.DOMAIN_SCALE_FACTOR, this.DOMAIN_SCALE_FACTOR, this.DOMAIN_SCALE_FACTOR);
-        this.simulationParams.DOMAIN_SCALE = this.domainScale;
-        this.simulationParamsNeedUpdate = true;
-
         const needsResize = twgl.resizeCanvasToDisplaySize(this.canvas);
 
         if (needsResize) {
@@ -143,9 +129,6 @@ export class Sketch {
         this.integratePrg = twgl.createProgramInfo(gl, [integrateVert, integrateFrag]);
         this.pressurePrg = twgl.createProgramInfo(gl, [pressureVert, pressureFrag]);
         this.forcePrg = twgl.createProgramInfo(gl, [forceVert, forceFrag]);
-        this.indicesPrg = twgl.createProgramInfo(gl, [indicesVert, indicesFrag]);
-        this.sortPrg = twgl.createProgramInfo(gl, [sortVert, sortFrag]);
-        this.offsetPrg = twgl.createProgramInfo(gl, [offsetVert, offsetFrag]);
         this.beadPrg = twgl.createProgramInfo(gl, [beadVert, beadFrag]);
 
         // Setup uinform blocks
@@ -157,6 +140,7 @@ export class Sketch {
         this.quadBufferInfo = twgl.createBufferInfoFromArrays(gl, { a_position: { numComponents: 2, data: [-1, -1, 3, -1, -1, 3] }});
         this.quadVAO = twgl.createVAOAndSetAttributes(gl, this.pressurePrg.attribSetters, this.quadBufferInfo.attribs, this.quadBufferInfo.indices);
 
+        // load the bead model
         this.glbBuilder = new GLBBuilder(gl);
         await this.glbBuilder.load(new URL('../assets/bead.glb', import.meta.url));
         this.beadPrimitive = this.glbBuilder.getPrimitiveDataByMeshName('bead');
@@ -173,9 +157,6 @@ export class Sketch {
         this.forceFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.force}], this.textureSize, this.textureSize);
         this.inFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position1},{attachment: this.textures.velocity1}], this.textureSize, this.textureSize);
         this.outFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position2},{attachment: this.textures.velocity2}], this.textureSize, this.textureSize);
-        this.indices1FBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.indices1}], this.textureSize, this.textureSize);
-        this.indices2FBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.indices2}], this.textureSize, this.textureSize);
-        this.offsetFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.offset}], this.cellSideCount, this.cellSideCount);
 
         this.worldMatrix = mat4.create();
 
@@ -203,8 +184,11 @@ export class Sketch {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
             vec2.copy(this.pointerLerp, this.pointer);
             vec2.copy(this.pointerLerpPrev, this.pointerLerp);
-            this.arcPointer = this.#projectArcBall(this.pointerLerp);
-            vec3.copy(this.arcPointerPrev, this.arcPointer);
+            this.arcPointer = this.#screenToSpherePos(this.pointerLerp);
+            if (this.arcPointer) 
+                vec3.copy(this.arcPointerPrev, this.arcPointer);
+            else
+                this.arcPointerPrev = null;
         });
         merge(
             fromEvent(this.canvas, 'pointerup'),
@@ -214,10 +198,6 @@ export class Sketch {
             //filter(() => this.isPointerDown)
         ).subscribe((e) => {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
-            if (!this.arcPointer) {
-                this.arcPointer = this.#projectArcBall(this.pointer);
-                vec3.copy(this.arcPointerPrev, this.arcPointer);
-            }
         });
 
         fromEvent(window.document, 'keyup').subscribe(() => this.debugKey = true);
@@ -231,13 +211,6 @@ export class Sketch {
         sim.VISC_LAP = 45.0 / (Math.PI * Math.pow(sim.H, 5.));
 
         this.simulationParamsNeedUpdate = true;
-    }
-
-    #getNormalizedPointerCoords(e) {
-        return vec2.fromValues(
-            (e.clientX / this.viewportSize[0]) * 2. - 1, 
-            (1 - (e.clientY / this.viewportSize[1])) * 2. - 1
-        );
     }
 
     #initTextures() {
@@ -254,16 +227,6 @@ export class Sketch {
 
         console.log('number of particles:', this.NUM_PARTICLES);
 
-        // update the sort params
-        this.logNumParticles = Math.log2(this.textureSize);
-        this.totalSortSteps = ((this.logNumParticles + this.logNumParticles) * (this.logNumParticles + this.logNumParticles + 1)) / 2;
-
-        // define the cell sizes
-        this.cellSideCount = Math.max(1, Math.ceil((this.textureSize * this.simulationParams.H) / this.DOMAIN_SCALE_FACTOR));
-        this.numCells = this.cellSideCount * this.cellSideCount;
-
-        console.log('number of cells:', this.numCells);
-
         const initVelocities = new Float32Array(this.NUM_PARTICLES * 4);
         const initForces = new Float32Array(this.NUM_PARTICLES * 4);
         const initPositions = new Float32Array(this.NUM_PARTICLES * 4);
@@ -279,10 +242,6 @@ export class Sketch {
             initPositions[i * 4 + 3] = 0;
         }
 
-        // empty offset texture
-        this.initialOffsetTextureData = new Uint16Array(this.numCells);
-        this.initialOffsetTextureData.fill(Number.MAX_VALUE);
-
         const defaultOptions = {
             width: this.textureSize,
             height: this.textureSize,
@@ -297,22 +256,6 @@ export class Sketch {
             internalFormat: gl.RGBA32F, 
         }
 
-        const defaultIndicesTexOptions = {
-            ...defaultOptions,
-            format: gl.RG_INTEGER,
-            internalFormat: gl.RG16UI,
-            wrap: gl.CLAMP_TO_EDGE
-        }
-
-        this.offsetTextureOptions = {
-            ...defaultOptions,
-            width: this.cellSideCount,
-            height: this.cellSideCount,
-            format: gl.RED_INTEGER,
-            internalFormat: gl.R16UI,
-            wrap: gl.CLAMP_TO_EDGE
-        }
-
         this.textures = twgl.createTextures(gl, { 
             densityPressure: {
                 ...defaultOptions,
@@ -324,19 +267,7 @@ export class Sketch {
             position1: { ...defaultVectorTexOptions, src: [...initPositions] },
             position2: { ...defaultVectorTexOptions, src: [...initPositions] },
             velocity1: { ...defaultVectorTexOptions, src: [...initVelocities] },
-            velocity2: { ...defaultVectorTexOptions, src: [...initVelocities] },
-            indices1: {
-                ...defaultIndicesTexOptions,
-                src: new Uint16Array(this.NUM_PARTICLES * 4)
-            },
-            indices2: {
-                ...defaultIndicesTexOptions,
-                src: new Uint16Array(this.NUM_PARTICLES * 4)
-            },
-            offset: {
-                ...this.offsetTextureOptions,
-                src: this.initialOffsetTextureData,
-            }
+            velocity2: { ...defaultVectorTexOptions, src: [...initVelocities] }
         });
 
         this.currentPositionTexture = this.textures.position2;
@@ -365,7 +296,18 @@ export class Sketch {
         this.pointerLerp[0] += (this.pointer[0] - this.pointerLerp[0]) / 5;
         this.pointerLerp[1] += (this.pointer[1] - this.pointerLerp[1]) / 5;
 
-        this.arcPointer = this.#projectArcBall(this.pointerLerp);
+        const newArcPointer = this.#screenToSpherePos(this.pointerLerp);
+
+        if (newArcPointer !== null) {
+            this.arcPointer = newArcPointer;
+            if (this.leftSphere) {
+                vec3.copy(this.arcPointerPrev, this.arcPointer);
+                this.leftSphere = false;
+            }
+        } else {
+            this.leftSphere = true;
+        }
+
         this.arcPointerDelta = vec3.subtract(this.arcPointerDelta, this.arcPointer, this.arcPointerPrev);
         vec3.copy(this.arcPointerPrev, this.arcPointer);
 
@@ -377,15 +319,11 @@ export class Sketch {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
-        //this.#prepare();
-
         if (this.simulationParamsNeedUpdate) {
             twgl.setBlockUniforms(
                 this.simulationParamsUBO,
                 {
                     ...this.simulationParams,
-                    CELL_TEX_SIZE: [this.cellSideCount, this.cellSideCount],
-                    CELL_SIZE: this.simulationParams.H
                 }
             );
             twgl.setUniformBlock(gl, this.pressurePrg, this.simulationParamsUBO);
@@ -400,9 +338,7 @@ export class Sketch {
         twgl.bindFramebufferInfo(gl, this.pressureFBO);
         gl.bindVertexArray(this.quadVAO);
         twgl.setUniforms(this.pressurePrg, { 
-            u_positionTexture: this.inFBO.attachments[0],
-            u_indicesTexture: this.currentIndicesTexture,
-            u_offsetTexture: this.textures.offset,
+            u_positionTexture: this.inFBO.attachments[0]
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
 
@@ -413,11 +349,7 @@ export class Sketch {
         twgl.setUniforms(this.forcePrg, { 
             u_densityPressureTexture: this.pressureFBO.attachments[0],
             u_positionTexture: this.inFBO.attachments[0], 
-            u_velocityTexture: this.inFBO.attachments[1],
-            u_indicesTexture: this.currentIndicesTexture,
-            u_offsetTexture: this.textures.offset,
-            u_cellTexSize: [this.cellSideCount, this.cellSideCount],
-            u_cellSize: this.simulationParams.H,
+            u_velocityTexture: this.inFBO.attachments[1]
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
 
@@ -432,7 +364,7 @@ export class Sketch {
             u_densityPressureTexture: this.pressureFBO.attachments[0],
             u_dt: deltaTime,
             u_time: this.#time,
-            u_domainScale: this.domainScale
+            u_domainScale: this.simulationParams.DOMAIN_SCALE
         });
         twgl.setBlockUniforms(
             this.pointerParamsUBO,
@@ -454,135 +386,6 @@ export class Sketch {
         const tmp = this.inFBO;
         this.inFBO = this.outFBO;
         this.outFBO = tmp;
-    }
-
-    #prepare() {
-        /** @type {WebGLRenderingContext} */
-        const gl = this.gl;
-
-        // update the indices structure
-        gl.useProgram(this.indicesPrg.program);
-        twgl.bindFramebufferInfo(gl, this.indices1FBO);
-        gl.bindVertexArray(this.quadVAO);
-        twgl.setUniforms(this.indicesPrg, { 
-            u_positionTexture: this.currentPositionTexture,
-            u_cellTexSize: [this.cellSideCount, this.cellSideCount],
-            u_cellSize: this.simulationParams.H,
-            u_domainScale: this.domainScale,
-        });
-        twgl.drawBufferInfo(gl, this.quadBufferInfo);
-
-        // sort by cell id
-        let sortOutFBO = this.indices1FBO;
-        let sortInFBO = this.indices2FBO;
-        gl.useProgram(this.sortPrg.program);
-
-        // https://developer.nvidia.com/gpugems/gpugems2/part-vi-simulation-and-numerical-algorithms/chapter-46-improved-gpu-sorting
-        let pass = -1;
-        let stage = -1;
-        let stepsLeft = this.totalSortSteps;
-        while(stepsLeft) {
-            // update pass and stage uniforms
-            pass--;
-            if (pass < 0) {
-                // next stage
-                stage++;
-                pass = stage;
-            }
-
-            const pstage = (1 << stage);
-            const ppass  = (1 << pass);
-
-            twgl.bindFramebufferInfo(gl, sortInFBO);
-            twgl.setUniforms(this.sortPrg, { 
-                u_indicesTexture: sortOutFBO.attachments[0],
-                u_twoStage: pstage + pstage,
-                u_passModStage: ppass % pstage,
-                u_twoStagePmS1: (pstage + pstage) - (ppass % pstage) - 1,
-                u_texSize: [this.textureSize, this.textureSize],
-                u_ppass: ppass
-            });
-            twgl.drawBufferInfo(gl, this.quadBufferInfo);
-
-            // buffer swap
-            const tmp = sortOutFBO;
-            sortOutFBO = sortInFBO;
-            sortInFBO = tmp;
-
-            stepsLeft--;
-
-
-            /*if (this.#frames > 0 && this.#frames < 2) {
-                console.log('pstage:', pstage, 'ppass:', ppass, 'twoStage:', pstage+pstage, 'passModStage:', ppass % pstage, 'twoStagePmS1:', (pstage + pstage) - (ppass % pstage) - 1);
-                console.log('particle count:', this.NUM_PARTICLES);
-                console.log('total steps:', this.totalSortSteps);
-                const indicesData = new Uint32Array(this.NUM_PARTICLES * 4);
-                gl.readPixels(0, 0, this.textureSize, this.textureSize, gl.RGBA_INTEGER, gl.UNSIGNED_INT, indicesData)
-                const cells = indicesData.reduce((arr, v, i) => i % 4 === 0 ? [...arr, v] : arr, []);
-                const cellIds = cells.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-                const particles = indicesData.reduce((arr, v, i) => i % 4 === 1 ? [...arr, v] : arr, []);
-                const particleIds = particles.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-                console.log(cellIds);
-                console.log('particleCount:', particleIds.length);
-                const isSorted = cellIds.every((v, i) => i === 0 || cellIds[i - 1] < v);
-                if (particleIds.length === this.NUM_PARTICLES && isSorted) 
-                    console.warn('success')
-                /*else
-                    console.error('fail');
-                for(let i=0; i<this.NUM_PARTICLES; i++) {
-                    console.log(i, 'cellId:',indicesData[i * 4], 'particleId:', indicesData[i * 4 + 1], 'z:', indicesData[i * 4 + 2], 'w:', indicesData[i * 4 + 3] )
-                }/
-                
-            }*/
-        }
-
-        /*const indicesData = new Uint32Array(this.NUM_PARTICLES * 4);
-        gl.readPixels(0, 0, this.textureSize, this.textureSize, gl.RGBA_INTEGER, gl.UNSIGNED_INT, indicesData)
-        const cells = indicesData.reduce((arr, v, i) => i % 4 === 0 ? [...arr, v] : arr, []);
-        const cellIds = cells.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-        const particles = indicesData.reduce((arr, v, i) => i % 4 === 1 ? [...arr, v] : arr, []);
-        const particleIds = particles.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-        const isSorted = cellIds.every((v, i) => i === 0 || cellIds[i - 1] < v);
-        if (particleIds.length !== this.NUM_PARTICLES && !isSorted) 
-            console.error('fail');*/
-
-
-        /*if (this.debugKey || (this.#frames > 20 && this.#frames < 22)) {
-            const indicesData = new Uint32Array(this.NUM_PARTICLES * 4);
-            gl.readPixels(0, 0, this.textureSize, this.textureSize, gl.RGBA_INTEGER, gl.UNSIGNED_INT, indicesData)
-            const cells = indicesData.reduce((arr, v, i) => i % 4 === 0 ? [...arr, v] : arr, []);
-            const cellIds = cells.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-            const particles = indicesData.reduce((arr, v, i) => i % 4 === 1 ? [...arr, v] : arr, []);
-            const particleIds = particles.reduce((arr, value) => arr.includes(value) ? arr : [...arr, value], []);
-            const isSorted = cellIds.every((v, i) => i === 0 || cellIds[i - 1] < v);
-            for(let i=0; i<this.NUM_PARTICLES; i++) {
-                console.log(i, 'cellId:',indicesData[i * 4], 'particleId:', indicesData[i * 4 + 1], 'z:', indicesData[i * 4 + 2], 'w:', indicesData[i * 4 + 3] )
-            }
-        }*/
-
-        // set the offset list elements
-        gl.useProgram(this.offsetPrg.program);
-        twgl.bindFramebufferInfo(gl, this.offsetFBO);
-        twgl.setUniforms(this.offsetPrg, { 
-            u_indicesTexture: sortOutFBO.attachments[0],
-            u_texSize: [this.cellSideCount, this.cellSideCount],
-            u_particleTexSize: [this.textureSize, this.textureSize],
-        });
-        gl.clearColor(1, 0, 0, 0);
-        twgl.drawBufferInfo(gl, this.quadBufferInfo);
-
-        this.currentIndicesTexture = sortOutFBO.attachments[0];
-
-        /*if (this.debugKey || (this.#frames > 20 && this.#frames < 22)) {
-            console.warn('offset pass');
-            const indicesData = new Uint32Array(this.numCells * 1);
-            gl.readPixels(0, 0, this.cellSideCount, this.cellSideCount, gl.RED_INTEGER, gl.UNSIGNED_INT, indicesData)
-            for(let i=0; i<this.numCells; i++) {
-                console.log(i, 'offset:',indicesData[i])
-            }
-
-            this.debugKey = false;
-        }*/
     }
 
     #animate(deltaTime) {
@@ -609,30 +412,6 @@ export class Sketch {
     #render() {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
-
-        /*twgl.bindFramebufferInfo(gl, null);
-        gl.disable(gl.CULL_FACE);
-        gl.disable(gl.DEPTH_TEST);
-        gl.clearColor(0., 0., 0., 1.);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.DST_ALPHA);
-
-        gl.useProgram(this.drawPrg.program);
-        twgl.setUniforms(this.drawPrg, { 
-            u_positionTexture: this.currentPositionTexture,
-            u_velocityTexture: this.currentVelocityTexture,
-            u_resolution: this.viewportSize,
-            u_cellTexSize: [this.cellSideCount, this.cellSideCount],
-            u_cellSize: this.simulationParams.H,
-            u_domainScale: this.domainScale,
-            u_worldMatrix: this.worldMatrix,
-            u_viewMatrix: this.camera.matrices.view,
-            u_projectionMatrix: this.camera.matrices.projection,
-            u_cameraPosition: this.camera.position,
-        });
-        gl.drawArrays(gl.POINTS, 0, this.NUM_PARTICLES);
-        gl.disable(gl.BLEND);*/
 
         twgl.bindFramebufferInfo(gl, null);
         gl.enable(gl.CULL_FACE);
@@ -665,7 +444,7 @@ export class Sketch {
     #updateProjectionMatrix(gl) {
         this.camera.aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
 
-        const height = 2.;
+        const height = 1.3;
         const distance = this.camera.position[2];
         if (this.camera.aspect > 1) {
             this.camera.fov = 2 * Math.atan( height / distance );
@@ -678,35 +457,46 @@ export class Sketch {
         mat4.multiply(this.camera.matrices.inversViewProjection, this.camera.matrix, this.camera.matrices.inversProjection)
     }
 
-    /**
-     * Maps pointer coordinates to canonical coordinates [-1, 1] 
-     * and projects them onto the arcball surface or onto a 
-     * hyperbolical function outside the arcball.
-     * 
-     * @return vec3 The arcball coords
-     * 
-     * @see https://www.xarg.org/2021/07/trackball-rotation-using-quaternions/
-     */
-     #projectArcBall(pos) {
-        const r = 1; // arcball radius
-        const w = this.viewportSize[0];
-        const h = this.viewportSize[1];
-        const s = Math.max(w, h) - 1;
-
+    #screenToSpherePos(screenPos) {
         // map to -1 to 1
-        let x = (2 * pos[0] - w - 1) / s;
-        let y = (2 * pos[1] - h - 1) / s;
-        x *= 2;
-        y *= 2;
-        let z = 0;
-        const xySq = x * x + y * y;
-        const rSq = r * r;
+        const x = (screenPos[0] / this.viewportSize[0]) * 2. - 1;
+        const y = (1 - (screenPos[1] / this.viewportSize[1])) * 2. - 1;
+        
+        // l(t) = p + t * u
+        const p = this.#screenToWorldPosition(x, y, 0);
+        const u = vec3.subtract(vec3.create(), p, this.camera.position);
+        vec3.normalize(u, u);
 
-        if (xySq <= rSq / 2)
-            z = Math.sqrt(rSq - xySq);
-        else
-            z = (rSq / 2) / Math.sqrt(xySq); // hyperbolical function
+        // sphere at origin intersection
+        const radius = 1.0;
+        const c = vec3.dot(p, p) - radius * radius;
+        const b = vec3.dot(u, p) * 2;
+        const a = 1;
+        const d = b * b - 4 * a * c;
 
-        return vec3.fromValues(x, -y, z);
+        if (d < 0) { 
+            // No solution
+            return null;
+        } else {
+            const sd = Math.sqrt(d);
+            const t1 = (-b + sd) / (2 * a);
+            const t2 = (-b - sd) / (2 * a);
+            const t = Math.min(t1, t2);
+
+            vec3.scale(u, u, t);
+            const i = vec3.add(vec3.create(), this.camera.position, u);
+
+            return i;
+        }
+    }
+
+    #screenToWorldPosition(x, y, z) {
+        const ndcPos = vec3.fromValues(x, y, z); 
+        const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), this.camera.matrices.inversViewProjection);
+        if (worldPos[3] !== 0){
+            vec4.scale(worldPos, worldPos, 1 / worldPos[3]);
+        }
+
+        return worldPos;
     }
 }

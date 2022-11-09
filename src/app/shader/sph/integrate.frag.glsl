@@ -9,7 +9,7 @@ uniform sampler2D u_velocityTexture;
 uniform sampler2D u_densityPressureTexture;
 uniform float u_dt;
 uniform float u_time;
-uniform vec3 u_domainScale;
+uniform vec4 u_domainScale;
 
 layout(std140) uniform u_PointerParams {
     vec3 pointerPos;
@@ -57,7 +57,6 @@ vec3 snoiseVec3( vec3 x ){
   return c;
 }
 
-
 vec3 curlNoise( vec3 p ){
   const float e = .1;
   vec3 dx = vec3( e   , 0.0 , 0.0 );
@@ -81,7 +80,7 @@ vec3 curlNoise( vec3 p ){
 
 void main() {
     ivec2 particleTexDimensions = textureSize(u_positionTexture, 0);
-    vec4 domainScale = vec4(u_domainScale, 0.);
+    vec4 domainScale = u_domainScale;
 
     vec4 pi = texture(u_positionTexture, v_uv);
     vec4 vi = texture(u_velocityTexture, v_uv);
@@ -105,13 +104,13 @@ void main() {
     pi += (vi + 0.5 * ai * dt) * dt;
     pi = normalize(pi);
 
+    // damp the velocity a bit
     vi *= 0.99;
 
     // add noise
-    vec3 n = curlNoise(pi.xyz * 2.5 + sin(u_time * 0.00001) * 2.) * 2. - 1.;
-    vi.xyz += n * 0.01;
+    vec3 n = curlNoise(pi.xyz * 2.5 + sin(u_time * 0.0001) * 2.) * 2. - 1.;
+    vi.xyz += n * 0.008;
     
-
     outPosition = pi;
     outVelocity = vi;
 }

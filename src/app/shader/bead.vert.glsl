@@ -35,7 +35,8 @@ void main() {
     vec4 pi = texelFetch(u_positionTexture, pi_tex, 0);
     vec4 vi = texelFetch(u_velocityTexture, pi_tex, 0);
 
-    vec4 pos = vec4(a_position * 0.08, 1.);
+    float scale = 0.085;
+    vec4 pos = vec4(a_position * scale, 1.);
 
     vec3 up = vec3(1., 0., 0.);
     vec3 axis = vec3(0., pi.z, pi.y);
@@ -43,7 +44,8 @@ void main() {
     mat3 lookAtMatrix = calcLookAtMatrix(vec3(0., 0., 0.), pi.xyz, 0.);
     pos = vec4(lookAtMatrix * pos.xyz, 1.);
 
-    pos += pi * (rand(float(gl_InstanceID)) * 0.02 + 0.98);
+    float flipFactor = mix(1., -0.96, step(0., -pi.z));
+    pos += pi * (rand(float(gl_InstanceID)) * 0.01 + 0.98) * flipFactor;
 
     vec4 worldPosition = u_worldMatrix * pos;
 

@@ -184,11 +184,6 @@ export class Sketch {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
             vec2.copy(this.pointerLerp, this.pointer);
             vec2.copy(this.pointerLerpPrev, this.pointerLerp);
-            this.arcPointer = this.#screenToSpherePos(this.pointerLerp);
-            if (this.arcPointer) 
-                vec3.copy(this.arcPointerPrev, this.arcPointer);
-            else
-                this.arcPointerPrev = null;
         });
         merge(
             fromEvent(this.canvas, 'pointerup'),

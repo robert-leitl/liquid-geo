@@ -95,9 +95,12 @@ void main() {
 
     // apply the pointer force
     vec4 pointerPos = vec4(pointerPos, 0.);
-    float pr = length(pointerPos * domainScale - pi * domainScale);
-    if (pr < pointerRadius) {
-        vi += vec4(pointerVelocity, 0.) * pointerStrength * (1. - pr / pointerRadius);
+    float prFront = length(pointerPos * domainScale - pi * domainScale);
+    float prBack = length(pointerPos * domainScale + pi * domainScale);
+    if (prFront < pointerRadius) {
+        vi += vec4(pointerVelocity, 0.) * pointerStrength * (1. - prFront / pointerRadius);
+    } else if (prBack < pointerRadius) {
+        vi -= vec4(pointerVelocity, 0.) * pointerStrength * 0.8 * (1. - prBack / pointerRadius);
     }
 
     // update the position

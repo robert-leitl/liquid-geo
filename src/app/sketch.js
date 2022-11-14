@@ -112,6 +112,8 @@ export class Sketch {
     async #init() {
         this.gl = this.canvas.getContext('webgl2', { antialias: false, alpha: false });
 
+        this.touchevents = Modernizr.touchevents;
+
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
@@ -188,7 +190,11 @@ export class Sketch {
         merge(
             fromEvent(this.canvas, 'pointerup'),
             fromEvent(this.canvas, 'pointerleave')
-        ).subscribe(() => this.isPointerDown = false);
+        ).subscribe(() => {
+            this.isPointerDown = false;
+            this.leftSphere = true;
+        });
+
         fromEvent(this.canvas, 'pointermove').pipe(
             //filter(() => this.isPointerDown)
         ).subscribe((e) => {
@@ -291,7 +297,9 @@ export class Sketch {
         this.pointerLerp[0] += (this.pointer[0] - this.pointerLerp[0]) / 5;
         this.pointerLerp[1] += (this.pointer[1] - this.pointerLerp[1]) / 5;
 
-        const newArcPointer = this.#screenToSpherePos(this.pointerLerp);
+        let newArcPointer = null;
+        if (!this.touchevents || this.isPointerDown)
+            newArcPointer = this.#screenToSpherePos(this.pointerLerp);
 
         if (newArcPointer !== null) {
             this.arcPointer = newArcPointer;
@@ -302,6 +310,7 @@ export class Sketch {
         } else {
             this.leftSphere = true;
         }
+        
 
         this.arcPointerDelta = vec3.subtract(this.arcPointerDelta, this.arcPointer, this.arcPointerPrev);
         vec3.copy(this.arcPointerPrev, this.arcPointer);

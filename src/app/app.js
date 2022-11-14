@@ -1,6 +1,7 @@
 import { concatAll, take, count, debounceTime, delay, filter, forkJoin, from, fromEvent, map, scan, withLatestFrom, of, switchMap, tap, distinctUntilChanged } from 'rxjs';
 import { Sketch } from './sketch';
 import { Pane } from 'tweakpane';
+import * as modernizr from './utils/modernizr';
 
 const queryString = window.location.search;
 const urlParams = new URLSearchParams(queryString);

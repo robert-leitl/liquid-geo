@@ -18,6 +18,7 @@
     "@loaders.gl/gltf": "^3.2.3",
     "gl-matrix": "^3.4.3",
     "rxjs": "^7.5.6",
+    "tone": "^14.7.77",
     "tweakpane": "^3.1.0",
     "twgl.js": "^5.0.4"
   }

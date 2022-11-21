@@ -1,10 +1,14 @@
+import * as Tone from 'tone';
+
 export class AudioRepeater {
 
     MAX_RECORD_LENGTH = 5; // seconds
-    FFT_BUFFER_SIZE = 512;
+    FFT_BUFFER_SIZE = 256;
 
     isRecording = false;
     isRecordingTimeoutId = null;
+
+    MIN_DB = -100;
 
     constructor(recordBtnElm, playbackBtnElm, isDev = false, pane = null) {
         this.isDev = isDev;
@@ -16,21 +20,6 @@ export class AudioRepeater {
     }
 
     init() {
-        this.audioContext = new AudioContext();
-
-        this.gain = this.audioContext.createGain();
-        this.gain.connect(this.audioContext.destination);
-
-        this.analyser = this.audioContext.createAnalyser();
-        this.analyser.fftSize = this.FFT_BUFFER_SIZE;
-        this.analyser.minDecibels = -90;
-        this.bufferLength = this.analyser.frequencyBinCount;
-        this.buffer = new Uint8Array(this.bufferLength);
-        // calculate the frequency bin bandwidth
-        this.freqBandwidth = (this.audioContext.sampleRate / 2) / this.bufferLength;
-
-        this.analyser.connect(this.gain);
-
         this.recordBtnElm.innerHTML = 'START REC';
         this.playbackBtnElm.innerHTML = 'PLAY';
         this.playbackBtnElm.setAttribute('disabled', true);
@@ -39,25 +28,50 @@ export class AudioRepeater {
         this.playbackBtnElm.addEventListener('click', () => this.onPlaybackButtonClicked());
     }
 
+    initAudio() {
+        this.audioContext = new AudioContext();
+        Tone.setContext(this.audioContext);
+
+        this.gain = this.audioContext.createGain();
+
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = this.FFT_BUFFER_SIZE;
+        this.analyser.minDecibels = -90;
+        this.bufferLength = this.analyser.frequencyBinCount;
+        this.buffer = new Uint8Array(this.bufferLength);
+        this.smoothedBuffer1 = new Float32Array(this.bufferLength);
+        this.smoothedBuffer2 = new Float32Array(this.bufferLength);
+        this.buffer.fill(0);
+        this.smoothedBuffer1.fill(0);
+        this.smoothedBuffer2.fill(0);
+        // calculate the frequency bin bandwidth
+        this.freqBandwidth = (this.audioContext.sampleRate / 2) / this.bufferLength;
+
+        this.dist = new Tone.Distortion(0.3);
+        this.pitchShift = new Tone.PitchShift(-2);
+        this.reverb = new Tone.Reverb(3);
+
+        Tone.connect(this.dist, this.pitchShift);
+        Tone.connect(this.pitchShift, this.reverb);
+        this.reverb.toDestination();
+    }
+
     startPlayback() {
-        this.playbackBtnElm.innerHTML = 'PAUSE';
+        this.audio.currentTime = 0;
         this.audio.play();
     }
 
     pausePlayback() {
-        this.playbackBtnElm.innerHTML = 'PLAY';
         this.audio.pause();
     }
 
     onPlaybackButtonClicked() {
-        if (this.audio.paused) {
-            this.startPlayback();
-        } else {
-            this.pausePlayback();
-        }
+        this.startPlayback();
     }
 
     async onRecordButtonClicked() {
+        if (!this.audioContext) this.initAudio();
+
         if (this.isRecording) {
             this.stopRecording();
         } else {
@@ -87,10 +101,10 @@ export class AudioRepeater {
                 this.audioBlob = new Blob(this.audioChunks, { type: "audio/mpeg" });
                 this.audioUrl = URL.createObjectURL(this.audioBlob);
                 this.audio = new Audio(this.audioUrl);
-                this.audio.loop = true;
 
                 this.source = this.audioContext.createMediaElementSource(this.audio);
-                this.source.connect(this.analyser);
+                Tone.connect(this.source, this.dist);
+                Tone.connect(this.source, this.analyser);
             });
         }
         this.mediaRecorder.start();
@@ -107,10 +121,25 @@ export class AudioRepeater {
     }
 
     getSpectrum(){
-        if (this.audio && !this.audio.paused) {
-            this.analyser.getByteFrequencyData( this.buffer );
-        } else {
-            this.buffer.fill(0);
+        if (this.audioContext) {
+            if (this.audio && !this.audio.paused) {
+                this.analyser.getByteFrequencyData( this.buffer );
+            } else {
+                this.buffer.fill(0);
+            }
+    
+            if (this.buffer) {
+                for(let i=0; i<this.buffer.length; ++i) {
+                    let targetValue = this.buffer[i] / 255;
+                    /*let targetValue = this.buffer[i];
+                    targetValue = targetValue === -Infinity ? this.MIN_DB : targetValue;
+                    targetValue = targetValue / this.MIN_DB;
+                    targetValue = Math.max(0, 1 - targetValue);*/
+
+                    this.smoothedBuffer1[i] += (targetValue - this.smoothedBuffer1[i]) / 10;
+                    this.smoothedBuffer2[i] += (this.smoothedBuffer1[i] - this.smoothedBuffer2[i]) / 5;
+                }
+            }
         }
 
         return this.buffer;

@@ -282,9 +282,10 @@ export class Sketch {
             {
                 width: this.spectrumTextureSize,
                 height: this.spectrumTextureSize,
-                format: gl.RED_INTEGER,
-                internalFormat: gl.R8UI,
-                src: this.audioRepeater.buffer
+                format: gl.RED,
+                internalFormat: gl.R32F,
+                type: gl.FLOAT,
+                minMag: gl.LINEAR
             }
         );
     }
@@ -430,7 +431,14 @@ export class Sketch {
 
         // update the spectrum texture
         this.audioRepeater.getSpectrum();
-        twgl.setTextureFromArray(gl, this.spectrumTexture, this.audioRepeater.buffer);
+        twgl.setTextureFromArray(gl, this.spectrumTexture, this.audioRepeater.smoothedBuffer2, {
+            width: this.spectrumTextureSize,
+            height: this.spectrumTextureSize,
+            format: gl.RED,
+            internalFormat: gl.R32F,
+            type: gl.FLOAT,
+            minMag: gl.LINEAR
+        });
     }
 
     #render() {
@@ -449,7 +457,8 @@ export class Sketch {
             u_projectionMatrix: this.camera.matrices.projection,
             u_positionTexture: this.currentPositionTexture,
             u_velocityTexture: this.currentVelocityTexture,
-            u_spectrumTexture: this.spectrumTexture
+            u_spectrumTexture: this.spectrumTexture,
+            u_time: this.#time
         });
         gl.bindVertexArray(this.beadVAO);
         gl.drawElementsInstanced(

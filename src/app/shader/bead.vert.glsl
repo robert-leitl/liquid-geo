@@ -33,18 +33,27 @@ float rand(float n){return fract(sin(n) * 43758.5453123);}
 
 void main() {
     ivec2 poisitionTexDimensions = textureSize(u_positionTexture, 0);
-    vec2 spectrumTexSize = vec2(textureSize(u_spectrumTexture, 0));
+    ivec2 spectrumTexSize = textureSize(u_spectrumTexture, 0);
     ivec2 pi_tex = ndx2tex(poisitionTexDimensions, gl_InstanceID);
     vec4 pi = texelFetch(u_positionTexture, pi_tex, 0);
     vec4 vi = texelFetch(u_velocityTexture, pi_tex, 0);
 
     
-    float f = float(gl_InstanceID + 1) / 512.;
-    f = max(0., dot(vec3(0., 0., 1.), pi.xyz));
-    f *= length(vi);
-    vec2 uv = vec2(mod(f, spectrumTexSize.x), floor(f / spectrumTexSize.y));
-    float audioOffset = texture(u_spectrumTexture, uv).r * 0.12;
-    audioOffset *= mix(1., 0., step(0., -pi.z));
+   //float f = float(gl_InstanceID + 1) / 512.;
+    float f = max(0., dot(vec3(0., 0., 1.), normalize(pi.xyz)));
+    float freq = (1. - f) * noise(pi.xyz * (sin(u_time * 0.001) + 2.));
+    int bucketCount = spectrumTexSize.x * spectrumTexSize.y;
+    int bucketNdx = int(floor(freq * float(bucketCount)));
+    ivec2 bucketTex = ndx2tex(spectrumTexSize, bucketNdx);
+    vec2 bucketUv = vec2(bucketTex) / vec2(spectrumTexSize);
+    float audioOffset = texture(u_spectrumTexture, bucketUv).r;
+    audioOffset *= min(0.1, length(vi)) * (f + 1.8);
+
+    //f *= length(vi);
+    //vec2 uv = vec2(mod(f, spectrumTexSize.x), floor(f / spectrumTexSize.y));
+    //float audioOffset = texture(u_spectrumTexture, uv).r * 0.12;
+    //audioOffset *= mix(1., 0., step(0., -pi.z));
+    //audioOffset = 0.;
 
     // add some variance to the radius
     pi *= (rand(float(gl_InstanceID)) * 0.01 + 0.98 + audioOffset);

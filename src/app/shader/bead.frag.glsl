@@ -17,5 +17,7 @@ ivec2 ndx2tex(ivec2 dimensions, int index) {
 }
 
 void main() {
-    outColor = vec4(v_normal * (float(v_instanceId + 1) / 512.), 1.);
+    outColor = vec4(v_normal, 1.);
+
+    //outColor = vec4((float(v_instanceId + 1) / 512.));
 }

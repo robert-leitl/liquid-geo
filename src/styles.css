@@ -36,3 +36,13 @@ canvas {
     padding: 0.7em 1em;
     font-size: 0.8em;
 }
+
+.audio-controls {
+    position: absolute;
+    bottom: 2em;
+    left: 50%;
+}
+
+.audio-controls button {
+    cursor: pointer;
+}

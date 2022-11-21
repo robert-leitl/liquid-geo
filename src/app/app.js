@@ -2,12 +2,14 @@ import { concatAll, take, count, debounceTime, delay, filter, forkJoin, from, fr
 import { Sketch } from './sketch';
 import { Pane } from 'tweakpane';
 import * as modernizr from './utils/modernizr';
+import { AudioRepeater } from './audio-repeater';
 
 const queryString = window.location.search;
 const urlParams = new URLSearchParams(queryString);
 const hasDebugParam = urlParams.get('debug');
 const isDev = import.meta.env.MODE === 'development';
 let sketch;
+let audioRepeater;
 let pane;
 
 if (isDev) {
@@ -36,5 +38,8 @@ fromEvent(window, 'load').pipe(take(1)).subscribe(() => resize());
 
 // INIT APP
 const canvasElm = document.querySelector('canvas');
-sketch = new Sketch(canvasElm, (instance) => instance.run(), isDev, pane);
+const recordBtnElm = document.querySelector('#record-button');
+const playbackBtnElm = document.querySelector('#playback-button');
+audioRepeater = new AudioRepeater(recordBtnElm, playbackBtnElm, isDev, pane);
+sketch = new Sketch(canvasElm, audioRepeater, (instance) => instance.run(), isDev, pane);
 resize();

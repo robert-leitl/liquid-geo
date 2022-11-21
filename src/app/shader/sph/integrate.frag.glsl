@@ -100,6 +100,8 @@ void main() {
     if (prFront < pointerRadius) {
         vi += vec4(pointerVelocity, 0.) * pointerStrength * (1. - prFront / pointerRadius);
     } else if (prBack < pointerRadius) {
+        // flip the pointer force on the back and lessen its strength, because
+        // the back particles are used to generate a second layer in the front of the sphere
         vi -= vec4(pointerVelocity, 0.) * pointerStrength * 0.8 * (1. - prBack / pointerRadius);
     }
 

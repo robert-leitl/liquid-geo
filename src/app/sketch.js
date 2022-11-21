@@ -67,11 +67,12 @@ export class Sketch {
         }
     };
 
-    constructor(canvasElm, onInit = null, isDev = false, pane = null) {
+    constructor(canvasElm, audioRepeater, onInit = null, isDev = false, pane = null) {
         this.canvas = canvasElm;
         this.onInit = onInit;
         this.isDev = isDev;
         this.pane = pane;
+        this.audioRepeater = audioRepeater;
 
         this.#init().then(() => {
             if (this.onInit) this.onInit(this)
@@ -228,6 +229,8 @@ export class Sketch {
 
         console.log('number of particles:', this.NUM_PARTICLES);
 
+        this.spectrumTextureSize = Math.sqrt(this.audioRepeater.bufferLength);
+
         const initVelocities = new Float32Array(this.NUM_PARTICLES * 4);
         const initForces = new Float32Array(this.NUM_PARTICLES * 4);
         const initPositions = new Float32Array(this.NUM_PARTICLES * 4);
@@ -273,6 +276,17 @@ export class Sketch {
 
         this.currentPositionTexture = this.textures.position2;
         this.currentVelocityTexture = this.textures.velocity2;
+
+        this.spectrumTexture = twgl.createTexture(
+            gl,
+            {
+                width: this.spectrumTextureSize,
+                height: this.spectrumTextureSize,
+                format: gl.RED_INTEGER,
+                internalFormat: gl.R8UI,
+                src: this.audioRepeater.buffer
+            }
+        );
     }
 
     #initTweakpane() {
@@ -393,8 +407,10 @@ export class Sketch {
     }
 
     #animate(deltaTime) {
-        this.#updatePointer();
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
 
+        this.#updatePointer();
 
         // use a fixed deltaTime of 10 ms adapted to
         // device frame rate
@@ -411,6 +427,10 @@ export class Sketch {
         for(let i=0; i<this.simulationParams.STEPS; ++i) {
             this.#simulate(deltaTime);
         }
+
+        // update the spectrum texture
+        this.audioRepeater.getSpectrum();
+        twgl.setTextureFromArray(gl, this.spectrumTexture, this.audioRepeater.buffer);
     }
 
     #render() {
@@ -429,6 +449,7 @@ export class Sketch {
             u_projectionMatrix: this.camera.matrices.projection,
             u_positionTexture: this.currentPositionTexture,
             u_velocityTexture: this.currentVelocityTexture,
+            u_spectrumTexture: this.spectrumTexture
         });
         gl.bindVertexArray(this.beadVAO);
         gl.drawElementsInstanced(

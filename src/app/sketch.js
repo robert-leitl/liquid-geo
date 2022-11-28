@@ -1,6 +1,7 @@
 import { mat4, vec2, vec3, vec4 } from "gl-matrix";
 import { filter, fromEvent, merge, throwIfEmpty } from "rxjs";
 import * as twgl from "twgl.js";
+import { GLBBuilder } from "./utils/glb-builder";
 
 import drawVert from './shader/sph/draw.vert.glsl';
 import drawFrag from './shader/sph/draw.frag.glsl';
@@ -10,9 +11,11 @@ import pressureVert from './shader/sph/pressure.vert.glsl';
 import pressureFrag from './shader/sph/pressure.frag.glsl';
 import forceVert from './shader/sph/force.vert.glsl';
 import forceFrag from './shader/sph/force.frag.glsl';
+import testVert from './shader/test.vert.glsl';
+import testFrag from './shader/test.frag.glsl';
 import beadVert from './shader/bead.vert.glsl';
 import beadFrag from './shader/bead.frag.glsl';
-import { GLBBuilder } from "./utils/glb-builder";
+import lightDepthFrag from './shader/light-depth.frag.glsl';
 
 export class Sketch {
 
@@ -53,7 +56,7 @@ export class Sketch {
 
     camera = {
         matrix: mat4.create(),
-        near: .1,
+        near: 4,
         far: 6,
         fov: Math.PI / 3,
         aspect: 1,
@@ -66,6 +69,21 @@ export class Sketch {
             inversViewProjection: mat4.create()
         }
     };
+    
+    light = {
+        matrix: mat4.create(),
+        position: vec3.scale(vec3.create(), vec3.normalize(vec3.create(), vec3.fromValues(1, 1, 1)), 6),
+        up: vec3.fromValues(0, 1, 0),
+        size: 2.4,
+        near: 4,
+        far: 7,
+        textureSize: 512,
+        matrices: {
+            view: mat4.create(),
+            projection: mat4.create(),
+            viewProjection: mat4.create()
+        }
+    }
 
     constructor(canvasElm, audioRepeater, onInit = null, isDev = false, pane = null) {
         this.canvas = canvasElm;
@@ -126,6 +144,7 @@ export class Sketch {
         );
 
         this.#initTextures();
+        this.#initLight();
 
         // Setup Programs
         this.drawPrg = twgl.createProgramInfo(gl, [drawVert, drawFrag]);
@@ -133,6 +152,8 @@ export class Sketch {
         this.pressurePrg = twgl.createProgramInfo(gl, [pressureVert, pressureFrag]);
         this.forcePrg = twgl.createProgramInfo(gl, [forceVert, forceFrag]);
         this.beadPrg = twgl.createProgramInfo(gl, [beadVert, beadFrag]);
+        this.testPrg = twgl.createProgramInfo(gl, [testVert, testFrag]);
+        this.lightDepthPrg = twgl.createProgramInfo(gl, [beadVert, lightDepthFrag]);
 
         // Setup uinform blocks
         this.simulationParamsUBO = twgl.createUniformBlockInfo(gl, this.pressurePrg, 'u_SimulationParams');
@@ -160,6 +181,10 @@ export class Sketch {
         this.forceFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.force}], this.textureSize, this.textureSize);
         this.inFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position1},{attachment: this.textures.velocity1}], this.textureSize, this.textureSize);
         this.outFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position2},{attachment: this.textures.velocity2}], this.textureSize, this.textureSize);
+        this.lightDepthFBO = twgl.createFramebufferInfo(gl, [{
+            attachmentPoint: gl.DEPTH_ATTACHMENT, 
+            attachment: this.lightDepthTexture
+        }], this.light.textureSize, this.light.textureSize)
 
         this.worldMatrix = mat4.create();
 
@@ -174,6 +199,7 @@ export class Sketch {
 
     #initEvents() {
         this.isPointerDown = false;
+        this.pointerLeft = true;
         this.pointer = vec2.create();
         this.pointerLerp = vec2.create();
         this.pointerLerpPrev = vec2.create();
@@ -184,6 +210,7 @@ export class Sketch {
 
         fromEvent(this.canvas, 'pointerdown').subscribe((e) => {
             this.isPointerDown = true;
+            this.pointerLeft = false;
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
             vec2.copy(this.pointerLerp, this.pointer);
             vec2.copy(this.pointerLerpPrev, this.pointerLerp);
@@ -194,12 +221,16 @@ export class Sketch {
         ).subscribe(() => {
             this.isPointerDown = false;
             this.leftSphere = true;
+            this.pointerLeft = true;
         });
 
-        fromEvent(this.canvas, 'pointermove').pipe(
-            //filter(() => this.isPointerDown)
-        ).subscribe((e) => {
+        fromEvent(this.canvas, 'pointermove').subscribe((e) => {
             this.pointer = vec2.fromValues(e.clientX, e.clientY);
+            if (this.pointerLeft) {
+                this.pointerLerp = vec2.clone(this.pointer);
+                this.pointerLerpPrev = vec2.clone(this.pointer);
+            }
+            this.pointerLeft = false;
         });
 
         fromEvent(window.document, 'keyup').subscribe(() => this.debugKey = true);
@@ -288,6 +319,17 @@ export class Sketch {
                 minMag: gl.LINEAR
             }
         );
+
+        this.lightDepthTexture = twgl.createTexture(
+            gl,
+            {
+                width: this.light.textureSize,
+                height: this.light.textureSize,
+                format: gl.DEPTH_COMPONENT,
+                internalFormat: gl.DEPTH_COMPONENT32F,
+                minMag: gl.NEAREST
+            }
+        );
     }
 
     #initTweakpane() {
@@ -306,6 +348,21 @@ export class Sketch {
 
         sim.on('change', () => this.#updateSimulationParams());
         pointer.on('change', () => this.pointerParamsNeedUpdate = true);
+    }
+
+    #initLight() {
+        mat4.targetTo(this.light.matrix, this.light.position, [0, 0, 0], this.light.up);
+        mat4.invert(this.light.matrices.view, this.light.matrix);
+        mat4.ortho(
+            this.light.matrices.projection, 
+            -this.light.size / 2,
+            this.light.size / 2,
+            -this.light.size / 2,
+            this.light.size / 2,
+            this.light.near,
+            this.light.far
+        );
+        mat4.multiply(this.light.matrices.viewProjection, this.light.matrices.projection, this.light.matrices.view);
     }
 
     #updatePointer() {
@@ -445,16 +502,18 @@ export class Sketch {
         /** @type {WebGLRenderingContext} */
         const gl = this.gl;
 
-        twgl.bindFramebufferInfo(gl, null);
+
+        // render the light depth texture
+        twgl.bindFramebufferInfo(gl, this.lightDepthFBO);
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
-        gl.clearColor(0., 0., 0., 1.);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.useProgram(this.beadPrg.program);
-        twgl.setUniforms(this.beadPrg, {
+        this.gl.clearColor(0, 0, 0, 1);
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+        this.gl.useProgram(this.lightDepthPrg.program);
+        twgl.setUniforms(this.lightDepthPrg, {
             u_worldMatrix: this.worldMatrix,
-            u_viewMatrix: this.camera.matrices.view,
-            u_projectionMatrix: this.camera.matrices.projection,
+            u_viewMatrix: this.light.matrices.view,
+            u_projectionMatrix: this.light.matrices.projection,
             u_positionTexture: this.currentPositionTexture,
             u_velocityTexture: this.currentVelocityTexture,
             u_spectrumTexture: this.spectrumTexture,
@@ -468,6 +527,47 @@ export class Sketch {
             0,
             this.NUM_PARTICLES
         );
+
+        // render the scene
+        twgl.bindFramebufferInfo(gl, null);
+        gl.enable(gl.CULL_FACE);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clearColor(0., 0., 0., 1.);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.useProgram(this.beadPrg.program);
+        twgl.setUniforms(this.beadPrg, {
+            u_worldMatrix: this.worldMatrix,
+            u_viewMatrix: this.camera.matrices.view,
+            u_projectionMatrix: this.camera.matrices.projection,
+            u_positionTexture: this.currentPositionTexture,
+            u_velocityTexture: this.currentVelocityTexture,
+            u_spectrumTexture: this.spectrumTexture,
+            u_time: this.#time,
+            u_lightDepthTexture: this.lightDepthTexture,
+            u_lightViewProjectionMatrix: this.light.matrices.viewProjection
+        });
+        gl.bindVertexArray(this.beadVAO);
+        gl.drawElementsInstanced(
+            gl.TRIANGLES,
+            this.beadBufferInfo.numElements,
+            gl.UNSIGNED_SHORT,
+            0,
+            this.NUM_PARTICLES
+        );
+
+
+        if (this.isDev) {
+            const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
+            // draw helper view of particle texture
+            twgl.bindFramebufferInfo(gl, null);
+            gl.viewport(0, 0, maxViewportSide / 3, maxViewportSide / 3);
+            gl.bindVertexArray(this.quadVAO);
+            gl.useProgram(this.testPrg.program);
+            twgl.setUniforms(this.testPrg, { 
+                u_texture: this.lightDepthTexture
+            });
+            twgl.drawBufferInfo(gl, this.quadBufferInfo);
+        }
     }
 
     #updateCameraMatrix() {
@@ -502,7 +602,7 @@ export class Sketch {
         vec3.normalize(u, u);
 
         // sphere at origin intersection
-        const radius = 1.0;
+        const radius = 1.05;
         const c = vec3.dot(p, p) - radius * radius;
         const b = vec3.dot(u, p) * 2;
         const a = 1;
@@ -518,7 +618,7 @@ export class Sketch {
             const t = Math.min(t1, t2);
 
             vec3.scale(u, u, t);
-            const i = vec3.add(vec3.create(), this.camera.position, u);
+            const i = vec3.add(vec3.create(), p, u);
 
             return i;
         }

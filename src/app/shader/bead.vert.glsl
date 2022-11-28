@@ -6,6 +6,7 @@ uniform sampler2D u_spectrumTexture;
 uniform mat4 u_worldMatrix;
 uniform mat4 u_viewMatrix;
 uniform mat4 u_projectionMatrix;
+uniform mat4 u_lightViewProjectionMatrix;
 uniform float u_time;
 
 in vec3 a_position;
@@ -13,6 +14,7 @@ in vec3 a_normal;
 in mat4 a_instanceMatrix;
 
 out vec3 v_position;
+out vec4 v_lightSpacePosition;
 out vec3 v_normal;
 flat out int v_instanceId;
 
@@ -55,10 +57,14 @@ void main() {
     //audioOffset *= mix(1., 0., step(0., -pi.z));
     //audioOffset = 0.;
 
+    audioOffset = smoothstep(0.3, 1., noise((pi.xyz + u_time * 0.0005) * 3.)); 
+    audioOffset *= 0.15;
+    //audioOffset = 0.;
+
     // add some variance to the radius
     pi *= (rand(float(gl_InstanceID)) * 0.01 + 0.98 + audioOffset);
 
-    float scale = 0.077;
+    float scale = 0.075;
     vec4 pos = vec4(a_position * scale, 1.);
 
     // make the beads orient to the surface of the sphere
@@ -75,6 +81,7 @@ void main() {
 
     vec4 worldPosition = u_worldMatrix * pos;
     v_position = worldPosition.xyz;
+    v_lightSpacePosition = u_lightViewProjectionMatrix * worldPosition;
     v_normal = lookAtMatrix * -a_normal;
     v_instanceId = gl_InstanceID;
     gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;

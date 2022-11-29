@@ -3,6 +3,7 @@
 uniform sampler2D u_positionTexture;
 uniform sampler2D u_velocityTexture;
 uniform sampler2D u_spectrumTexture;
+uniform vec3 u_cameraPosition;
 uniform mat4 u_worldMatrix;
 uniform mat4 u_viewMatrix;
 uniform mat4 u_projectionMatrix;
@@ -16,6 +17,7 @@ in mat4 a_instanceMatrix;
 out vec3 v_position;
 out vec4 v_lightSpacePosition;
 out vec3 v_normal;
+out vec3 v_surfaceToView;
 out float v_emission;
 flat out int v_instanceId;
 
@@ -43,7 +45,7 @@ void main() {
 
     
     // get an audio spectrum value from the front facing beads backwards
-    float f = max(0., dot(vec3(0., 0., 1.), normalize(pi.xyz)));
+    float f = max(0., dot(vec3(0., 0., 1.), normalize(pi.xyz))) + .75;
     float freq = (1. - f);
     int bucketCount = spectrumTexSize.x * spectrumTexSize.y;
     int bucketNdx = int(floor(freq * float(bucketCount)));
@@ -51,9 +53,10 @@ void main() {
     vec2 bucketUv = vec2(bucketTex) / vec2(spectrumTexSize);
     float audioOffset = texture(u_spectrumTexture, bucketUv).r;
     float offset = audioOffset * smoothstep(0.3, 1., noise((pi.xyz + u_time * 0.0005) * 3.)); 
+    offset *= mix(1., 0., step(0., -pi.z));
 
     // add some variance and the offset from the audio spectrum to the radius
-    float maxOffset = 0.2;
+    float maxOffset = .3;
     pi *= (rand(float(gl_InstanceID)) * 0.01 + 0.98 + (offset * maxOffset));
 
     // scale the bead down to fit on the sphere
@@ -73,12 +76,13 @@ void main() {
     pos += pi * flipFactor;
 
     // the emission is defined by the beads velocity and audio offset
-    v_emission = (length(vi) * 0.25)  + offset;
+    v_emission = smoothstep(0.1, 1., (length(vi) * 0.2)) ;
 
     vec4 worldPosition = u_worldMatrix * pos;
     v_position = worldPosition.xyz;
     v_lightSpacePosition = u_lightViewProjectionMatrix * worldPosition;
     v_normal = lookAtMatrix * -a_normal;
     v_instanceId = gl_InstanceID;
+    v_surfaceToView = u_cameraPosition - worldPosition.xyz;
     gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;
 }

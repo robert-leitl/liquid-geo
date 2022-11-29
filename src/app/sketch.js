@@ -16,6 +16,8 @@ import testFrag from './shader/test.frag.glsl';
 import beadVert from './shader/bead.vert.glsl';
 import beadFrag from './shader/bead.frag.glsl';
 import lightDepthFrag from './shader/light-depth.frag.glsl';
+import compositeVert from './shader/composite.vert.glsl';
+import compositeFrag from './shader/composite.frag.glsl';
 
 export class Sketch {
 
@@ -29,6 +31,9 @@ export class Sketch {
 
     // particle constants
     NUM_PARTICLES = 500;
+
+    // the scale factor for the bloom and lensflare highpass texture
+    HIGHPASS_SCALE = 0.25;
 
     simulationParams = {
         H: 1, // kernel radius
@@ -123,6 +128,14 @@ export class Sketch {
 
         if (needsResize) {
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+            if (this.highpassFBO)
+                twgl.resizeFramebufferInfo(gl, this.highpassFBO, [{attachment: this.highpassTexture}], 
+                    this.viewportSize[0] * this.HIGHPASS_SCALE, this.viewportSize[1] * this.HIGHPASS_SCALE);
+
+            if (this.drawFBO) {
+                twgl.resizeFramebufferInfo(gl, this.drawFBO, this.drawFBOAttachements, this.viewportSize[0], this.viewportSize[1]);
+            }
         }
 
         this.#updateProjectionMatrix(gl);
@@ -145,6 +158,7 @@ export class Sketch {
 
         this.#initTextures();
         this.#initLight();
+        await this.#initEnvMap();
 
         // Setup Programs
         this.drawPrg = twgl.createProgramInfo(gl, [drawVert, drawFrag]);
@@ -154,6 +168,7 @@ export class Sketch {
         this.beadPrg = twgl.createProgramInfo(gl, [beadVert, beadFrag]);
         this.testPrg = twgl.createProgramInfo(gl, [testVert, testFrag]);
         this.lightDepthPrg = twgl.createProgramInfo(gl, [beadVert, lightDepthFrag]);
+        this.compositePrg = twgl.createProgramInfo(gl, [compositeVert, compositeFrag]);
 
         // Setup uinform blocks
         this.simulationParamsUBO = twgl.createUniformBlockInfo(gl, this.pressurePrg, 'u_SimulationParams');
@@ -184,7 +199,14 @@ export class Sketch {
         this.lightDepthFBO = twgl.createFramebufferInfo(gl, [{
             attachmentPoint: gl.DEPTH_ATTACHMENT, 
             attachment: this.lightDepthTexture
-        }], this.light.textureSize, this.light.textureSize)
+        }], this.light.textureSize, this.light.textureSize);
+        this.drawFBOAttachements = [
+            {format: gl.RGBA, internalFormat: gl.RGBA32F}, 
+            {attachmentPoint: gl.DEPTH_ATTACHMENT, format: gl.DEPTH_COMPONENT, internalFormat: gl.DEPTH_COMPONENT32F}
+        ];
+        this.drawFBO = twgl.createFramebufferInfo(gl, this.drawFBOAttachements, this.viewportSize[0], this.viewportSize[1]);
+        this.colorTexture = this.drawFBO.attachments[0];
+        this.highpassFBO = twgl.createFramebufferInfo(gl, [{attachment: this.highpassTexture}]);
 
         this.worldMatrix = mat4.create();
 
@@ -330,6 +352,25 @@ export class Sketch {
                 minMag: gl.NEAREST
             }
         );
+
+        this.highpassTexture = twgl.createTexture(
+            gl,
+            {
+                width: this.viewportSize[0] * this.HIGHPASS_SCALE,
+                height: this.viewportSize[1] * this.HIGHPASS_SCALE,
+            }
+        );
+    }
+
+    #initEnvMap() {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        return new Promise((resolve) => {
+            this.envMapTexture = twgl.createTexture(gl, {
+                src: new URL('../assets/env-map-02.jpg', import.meta.url).toString(),
+            }, () => resolve());
+        });
     }
 
     #initTweakpane() {
@@ -529,7 +570,7 @@ export class Sketch {
         );
 
         // render the scene
-        twgl.bindFramebufferInfo(gl, null);
+        twgl.bindFramebufferInfo(gl, this.drawFBO);
         gl.enable(gl.CULL_FACE);
         gl.enable(gl.DEPTH_TEST);
         gl.clearColor(0., 0., 0., 1.);
@@ -542,9 +583,11 @@ export class Sketch {
             u_positionTexture: this.currentPositionTexture,
             u_velocityTexture: this.currentVelocityTexture,
             u_spectrumTexture: this.spectrumTexture,
+            u_envMapTexture: this.envMapTexture,
             u_time: this.#time,
             u_lightDepthTexture: this.lightDepthTexture,
-            u_lightViewProjectionMatrix: this.light.matrices.viewProjection
+            u_lightViewProjectionMatrix: this.light.matrices.viewProjection,
+            u_cameraPosition: this.camera.position
         });
         gl.bindVertexArray(this.beadVAO);
         gl.drawElementsInstanced(
@@ -554,6 +597,16 @@ export class Sketch {
             0,
             this.NUM_PARTICLES
         );
+
+        // composite the final image
+        twgl.bindFramebufferInfo(gl, null);
+        gl.viewport(0, 0, this.viewportSize[0], this.viewportSize[1]);
+        gl.bindVertexArray(this.quadVAO);
+        gl.useProgram(this.compositePrg.program);
+        twgl.setUniforms(this.compositePrg, { 
+            u_colorTexture: this.colorTexture
+        });
+        twgl.drawBufferInfo(gl, this.quadBufferInfo);
 
 
         if (this.isDev) {

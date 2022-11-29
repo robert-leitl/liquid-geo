@@ -16,6 +16,7 @@ in mat4 a_instanceMatrix;
 out vec3 v_position;
 out vec4 v_lightSpacePosition;
 out vec3 v_normal;
+out float v_emission;
 flat out int v_instanceId;
 
 #include ./sph/utils/particle-utils.glsl;
@@ -41,29 +42,21 @@ void main() {
     vec4 vi = texelFetch(u_velocityTexture, pi_tex, 0);
 
     
-   //float f = float(gl_InstanceID + 1) / 512.;
+    // get an audio spectrum value from the front facing beads backwards
     float f = max(0., dot(vec3(0., 0., 1.), normalize(pi.xyz)));
-    float freq = (1. - f) * noise(pi.xyz * (sin(u_time * 0.001) + 2.));
+    float freq = (1. - f);
     int bucketCount = spectrumTexSize.x * spectrumTexSize.y;
     int bucketNdx = int(floor(freq * float(bucketCount)));
     ivec2 bucketTex = ndx2tex(spectrumTexSize, bucketNdx);
     vec2 bucketUv = vec2(bucketTex) / vec2(spectrumTexSize);
     float audioOffset = texture(u_spectrumTexture, bucketUv).r;
-    audioOffset *= min(0.1, length(vi)) * (f + 1.8);
+    float offset = audioOffset * smoothstep(0.3, 1., noise((pi.xyz + u_time * 0.0005) * 3.)); 
 
-    //f *= length(vi);
-    //vec2 uv = vec2(mod(f, spectrumTexSize.x), floor(f / spectrumTexSize.y));
-    //float audioOffset = texture(u_spectrumTexture, uv).r * 0.12;
-    //audioOffset *= mix(1., 0., step(0., -pi.z));
-    //audioOffset = 0.;
+    // add some variance and the offset from the audio spectrum to the radius
+    float maxOffset = 0.2;
+    pi *= (rand(float(gl_InstanceID)) * 0.01 + 0.98 + (offset * maxOffset));
 
-    audioOffset = smoothstep(0.3, 1., noise((pi.xyz + u_time * 0.0005) * 3.)); 
-    audioOffset *= 0.15;
-    //audioOffset = 0.;
-
-    // add some variance to the radius
-    pi *= (rand(float(gl_InstanceID)) * 0.01 + 0.98 + audioOffset);
-
+    // scale the bead down to fit on the sphere
     float scale = 0.075;
     vec4 pos = vec4(a_position * scale, 1.);
 
@@ -78,6 +71,9 @@ void main() {
     // a second layer behind the sphere front layer
     float flipFactor = mix(1., -0.97, step(0., -pi.z));
     pos += pi * flipFactor;
+
+    // the emission is defined by the beads velocity and audio offset
+    v_emission = (length(vi) * 0.25)  + offset;
 
     vec4 worldPosition = u_worldMatrix * pos;
     v_position = worldPosition.xyz;

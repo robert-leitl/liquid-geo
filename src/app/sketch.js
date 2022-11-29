@@ -50,8 +50,8 @@ export class Sketch {
     };
 
     pointerParams = {
-        RADIUS: .65,
-        STRENGTH: 15,
+        RADIUS: .5,
+        STRENGTH: 20,
     }
 
     camera = {
@@ -77,7 +77,7 @@ export class Sketch {
         size: 2.4,
         near: 4,
         far: 7,
-        textureSize: 512,
+        textureSize: 1024,
         matrices: {
             view: mat4.create(),
             projection: mat4.create(),
@@ -557,7 +557,7 @@ export class Sketch {
 
 
         if (this.isDev) {
-            const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
+            /*const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
             // draw helper view of particle texture
             twgl.bindFramebufferInfo(gl, null);
             gl.viewport(0, 0, maxViewportSide / 3, maxViewportSide / 3);
@@ -566,7 +566,7 @@ export class Sketch {
             twgl.setUniforms(this.testPrg, { 
                 u_texture: this.lightDepthTexture
             });
-            twgl.drawBufferInfo(gl, this.quadBufferInfo);
+            twgl.drawBufferInfo(gl, this.quadBufferInfo);*/
         }
     }
 

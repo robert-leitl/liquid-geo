@@ -12,13 +12,18 @@ uniform float u_time;
 
 in vec3 a_position;
 in vec3 a_normal;
+in vec2 a_texcoord;
+in vec3 a_tangent;
 in mat4 a_instanceMatrix;
 
 out vec3 v_position;
 out vec4 v_lightSpacePosition;
 out vec3 v_normal;
+out vec3 v_tangent;
+out vec2 v_texcoord;
 out vec3 v_surfaceToView;
 out float v_emission;
+out float v_darken;
 flat out int v_instanceId;
 
 #include ./sph/utils/particle-utils.glsl;
@@ -73,6 +78,7 @@ void main() {
     // flip the beads on the back of the sphere to create
     // a second layer behind the sphere front layer
     float flipFactor = mix(1., -0.97, step(0., -pi.z));
+    v_darken = step(0., flipFactor) * 0.5 + 0.5;
     pos += pi * flipFactor;
 
     // the emission is defined by the beads velocity and audio offset
@@ -84,5 +90,7 @@ void main() {
     v_normal = lookAtMatrix * -a_normal;
     v_instanceId = gl_InstanceID;
     v_surfaceToView = u_cameraPosition - worldPosition.xyz;
+    v_texcoord = a_texcoord;
+    v_tangent = a_tangent;
     gl_Position = u_projectionMatrix * u_viewMatrix * worldPosition;
 }

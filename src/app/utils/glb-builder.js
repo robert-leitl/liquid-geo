@@ -37,8 +37,10 @@ export class GLBBuilder {
         const indices = GLBBuilder.getAccessorData(glb, primitiveDef.indices);
         const vertices = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.POSITION);
         const normals = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.NORMAL);
+        const texcoords = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.TEXCOORD_0);
+        const tangents = GLBBuilder.getAccessorData(glb, primitiveDef.attributes.TANGENT);
 
-        if (!indices || !vertices || !normals) return null;
+        if (!indices || !vertices || !normals || !texcoords || !tangents) return null;
 
         // Create buffers:
         const indicesBuffer = gl.createBuffer();
@@ -52,6 +54,14 @@ export class GLBBuilder {
         const normalsBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, normalsBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+
+        const texcoordsBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texcoordsBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, texcoords, gl.STATIC_DRAW);
+
+        const tangentsBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, tangentsBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, tangents, gl.STATIC_DRAW);
 
         const buffers = {
 
@@ -79,6 +89,24 @@ export class GLBBuilder {
                 dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.attributes.NORMAL),
                 numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.attributes.NORMAL),
                 stride: glb.json.bufferViews[glb.json.accessors[primitiveDef.attributes.NORMAL].bufferView].byteStride || 0
+            },
+
+            texcoords: {
+                data: texcoords,
+                webglBuffer: texcoordsBuffer,
+                length: texcoords.length,
+                dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.attributes.TEXCOORD_0),
+                numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.attributes.TEXCOORD_0),
+                stride: glb.json.bufferViews[glb.json.accessors[primitiveDef.attributes.TEXCOORD_0].bufferView].byteStride || 0
+            },
+
+            tangents: {
+                data: tangents,
+                webglBuffer: tangentsBuffer,
+                length: tangents.length,
+                dataType: GLBBuilder.getAccessorDataType(gl, glb, primitiveDef.attributes.TANGENT),
+                numberOfComponents: GLBBuilder.getAccessorNumberOfComponents(glb, primitiveDef.attributes.TANGENT),
+                stride: glb.json.bufferViews[glb.json.accessors[primitiveDef.attributes.TANGENT].bufferView].byteStride || 0
             }
         };
 

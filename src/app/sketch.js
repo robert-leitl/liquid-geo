@@ -16,6 +16,10 @@ import testFrag from './shader/test.frag.glsl';
 import beadVert from './shader/bead.vert.glsl';
 import beadFrag from './shader/bead.frag.glsl';
 import lightDepthFrag from './shader/light-depth.frag.glsl';
+import highpassVert from './shader/highpass.vert.glsl';
+import highpassFrag from './shader/highpass.frag.glsl';
+import blurVert from './shader/blur.vert.glsl';
+import blurFrag from './shader/blur.frag.glsl';
 import compositeVert from './shader/composite.vert.glsl';
 import compositeFrag from './shader/composite.frag.glsl';
 
@@ -33,7 +37,7 @@ export class Sketch {
     NUM_PARTICLES = 500;
 
     // the scale factor for the bloom and lensflare highpass texture
-    HIGHPASS_SCALE = 0.25;
+    SS_FX_SCALE = 0.2;
 
     simulationParams = {
         H: 1, // kernel radius
@@ -126,12 +130,21 @@ export class Sketch {
 
         const needsResize = twgl.resizeCanvasToDisplaySize(this.canvas);
 
+        const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
+        this.SS_FX_SCALE = Math.min(1, 256 / maxViewportSide);
+
         if (needsResize) {
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
-            if (this.highpassFBO)
-                twgl.resizeFramebufferInfo(gl, this.highpassFBO, [{attachment: this.highpassTexture}], 
-                    this.viewportSize[0] * this.HIGHPASS_SCALE, this.viewportSize[1] * this.HIGHPASS_SCALE);
+            if (this.highpassFBO) {
+                twgl.resizeFramebufferInfo(gl, this.highpassFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+                    this.viewportSize[0] * this.SS_FX_SCALE, this.viewportSize[1] * this.SS_FX_SCALE);
+            }
+
+            if (this.blurFBO) {
+                twgl.resizeFramebufferInfo(gl, this.blurFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+                    this.viewportSize[0] * this.SS_FX_SCALE, this.viewportSize[1] * this.SS_FX_SCALE);
+            }
 
             if (this.drawFBO) {
                 twgl.resizeFramebufferInfo(gl, this.drawFBO, this.drawFBOAttachements, this.viewportSize[0], this.viewportSize[1]);
@@ -159,6 +172,7 @@ export class Sketch {
         this.#initTextures();
         this.#initLight();
         await this.#initEnvMap();
+        await this.#initNormalMap();
 
         // Setup Programs
         this.drawPrg = twgl.createProgramInfo(gl, [drawVert, drawFrag]);
@@ -168,6 +182,8 @@ export class Sketch {
         this.beadPrg = twgl.createProgramInfo(gl, [beadVert, beadFrag]);
         this.testPrg = twgl.createProgramInfo(gl, [testVert, testFrag]);
         this.lightDepthPrg = twgl.createProgramInfo(gl, [beadVert, lightDepthFrag]);
+        this.highpassPrg = twgl.createProgramInfo(gl, [highpassVert, highpassFrag]);
+        this.blurPrg = twgl.createProgramInfo(gl, [blurVert, blurFrag]);
         this.compositePrg = twgl.createProgramInfo(gl, [compositeVert, compositeFrag]);
 
         // Setup uinform blocks
@@ -187,6 +203,8 @@ export class Sketch {
         this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, { 
             a_position: {...this.beadBuffers.vertices, numComponents: this.beadBuffers.vertices.numberOfComponents},
             a_normal: {...this.beadBuffers.normals, numComponents: this.beadBuffers.normals.numberOfComponents},
+            a_texcoord: {...this.beadBuffers.texcoords, numComponents: this.beadBuffers.texcoords.numberOfComponents},
+            a_tangent: {...this.beadBuffers.tangents, numComponents: this.beadBuffers.tangents.numberOfComponents},
             indices: {...this.beadBuffers.indices, numComponents: this.beadBuffers.indices.numberOfComponents}
         });
         this.beadVAO = twgl.createVAOAndSetAttributes(gl, this.beadPrg.attribSetters, this.beadBufferInfo.attribs, this.beadBufferInfo.indices);
@@ -206,7 +224,20 @@ export class Sketch {
         ];
         this.drawFBO = twgl.createFramebufferInfo(gl, this.drawFBOAttachements, this.viewportSize[0], this.viewportSize[1]);
         this.colorTexture = this.drawFBO.attachments[0];
-        this.highpassFBO = twgl.createFramebufferInfo(gl, [{attachment: this.highpassTexture}]);
+        this.highpassFBO = twgl.createFramebufferInfo(
+            gl, 
+            [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+            this.viewportSize[0] * this.SS_FX_SCALE,
+            this.viewportSize[1] * this.SS_FX_SCALE
+        );
+        this.highpassTexture = this.highpassFBO.attachments[0];
+        this.blurFBO = twgl.createFramebufferInfo(
+            gl, 
+            [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+            this.viewportSize[0] * this.SS_FX_SCALE,
+            this.viewportSize[1] * this.SS_FX_SCALE
+        );
+        this.blurTexture = this.blurFBO.attachments[0];
 
         this.worldMatrix = mat4.create();
 
@@ -352,14 +383,6 @@ export class Sketch {
                 minMag: gl.NEAREST
             }
         );
-
-        this.highpassTexture = twgl.createTexture(
-            gl,
-            {
-                width: this.viewportSize[0] * this.HIGHPASS_SCALE,
-                height: this.viewportSize[1] * this.HIGHPASS_SCALE,
-            }
-        );
     }
 
     #initEnvMap() {
@@ -369,6 +392,17 @@ export class Sketch {
         return new Promise((resolve) => {
             this.envMapTexture = twgl.createTexture(gl, {
                 src: new URL('../assets/env-map-02.jpg', import.meta.url).toString(),
+            }, () => resolve());
+        });
+    }
+
+    #initNormalMap() {
+        /** @type {WebGLRenderingContext} */
+        const gl = this.gl;
+
+        return new Promise((resolve) => {
+            this.normalMapTexture = twgl.createTexture(gl, {
+                src: new URL('../assets/normal.png', import.meta.url).toString(),
             }, () => resolve());
         });
     }
@@ -587,7 +621,8 @@ export class Sketch {
             u_time: this.#time,
             u_lightDepthTexture: this.lightDepthTexture,
             u_lightViewProjectionMatrix: this.light.matrices.viewProjection,
-            u_cameraPosition: this.camera.position
+            u_cameraPosition: this.camera.position,
+            u_normalMapTexture: this.normalMapTexture
         });
         gl.bindVertexArray(this.beadVAO);
         gl.drawElementsInstanced(
@@ -598,26 +633,45 @@ export class Sketch {
             this.NUM_PARTICLES
         );
 
+        // get highpass
+        twgl.bindFramebufferInfo(gl, this.highpassFBO);
+        gl.bindVertexArray(this.quadVAO);
+        gl.useProgram(this.highpassPrg.program);
+        twgl.setUniforms(this.highpassPrg, { 
+            u_colorTexture: this.colorTexture
+        });
+        twgl.drawBufferInfo(gl, this.quadBufferInfo);
+
+        // blur pass
+        twgl.bindFramebufferInfo(gl, this.blurFBO);
+        gl.bindVertexArray(this.quadVAO);
+        gl.useProgram(this.blurPrg.program);
+        twgl.setUniforms(this.blurPrg, { 
+            u_colorTexture: this.highpassTexture
+        });
+        twgl.drawBufferInfo(gl, this.quadBufferInfo);
+
         // composite the final image
         twgl.bindFramebufferInfo(gl, null);
         gl.viewport(0, 0, this.viewportSize[0], this.viewportSize[1]);
         gl.bindVertexArray(this.quadVAO);
         gl.useProgram(this.compositePrg.program);
         twgl.setUniforms(this.compositePrg, { 
+            u_bloomTexture: this.blurTexture,
             u_colorTexture: this.colorTexture
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
-
 
         if (this.isDev) {
             /*const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
             // draw helper view of particle texture
             twgl.bindFramebufferInfo(gl, null);
-            gl.viewport(0, 0, maxViewportSide / 3, maxViewportSide / 3);
+            gl.viewport(0, 0, this.viewportSize[0] / 4, this.viewportSize[1] / 4);
             gl.bindVertexArray(this.quadVAO);
+            gl.disable(gl.DEPTH_TEST);
             gl.useProgram(this.testPrg.program);
             twgl.setUniforms(this.testPrg, { 
-                u_texture: this.lightDepthTexture
+                u_texture: this.highpassTexture
             });
             twgl.drawBufferInfo(gl, this.quadBufferInfo);*/
         }

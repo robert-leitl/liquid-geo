@@ -5,6 +5,7 @@ precision highp float;
 uniform sampler2D u_spectrumTexture;
 uniform sampler2D u_lightDepthTexture;
 uniform sampler2D u_envMapTexture;
+uniform sampler2D u_normalMapTexture;
 
 out vec4 outColor;
 
@@ -12,7 +13,10 @@ in vec3 v_position;
 in vec4 v_lightSpacePosition;
 in vec3 v_normal;
 in vec3 v_surfaceToView;
+in vec2 v_texcoord;
+in vec3 v_tangent;
 in float v_emission;
+in float v_darken;
 flat in int v_instanceId;
 
 #define BOXBLUR2D_KERNELSIZE 7
@@ -57,9 +61,17 @@ vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ) {
 void main() {
     vec3 color = vec3(0.);
 
+    vec3 T = normalize(v_tangent);
     vec3 N = normalize(v_normal);
     vec3 V = normalize(v_surfaceToView);
     vec3 R = reflect(N, V);
+
+    // perturb normal
+    vec3 B = normalize(cross(N, T));
+    mat3 tangentSpace = mat3(T, B, N);
+    vec3 normalOffset = texture(u_normalMapTexture, v_texcoord + float(v_instanceId) * 0.5).xyz;
+    normalOffset = normalOffset.rgb * 2. - 1.;
+    N = normalize(mix(N, tangentSpace * normalOffset, 1.5));
 
     // get shadow factor
     // divide by w to get the correct value
@@ -90,21 +102,18 @@ void main() {
     color *= shadow;
 
     // add emission effect
-    /*vec3 a = vec3(0.5, 0.5, 0.5);
-    vec3 b = vec3(0.5, 0.5, 0.5);
-    vec3 c = vec3(1.4, 0.75, 0.2); 	
-    vec3 d = vec3(0.00, 0.05, 0.20);
-    vec3 emission = palette( v_emission * 0.4 + 0.3, a, b, c, d) * v_emission;*/
     vec3 a = vec3(0.5, 0.5, 0.5);
     vec3 b = vec3(0.5, 0.5, 0.5);
     vec3 c = vec3(1.1, 0.75, 0.2); 	
     vec3 d = vec3(0.00, 0.05, 0.20);
     vec3 emission = palette( v_emission * 0.53 + 0.4, a, b, c, d) * v_emission;
-    //color += vec3(v_emission, v_emission, v_emission + .1) * vec3(.9, 0.1, .1);
     color += emission;
 
     // add subtle fresnel
     color += fresnel * 0.1;
+
+    // darken the bottom layer
+    color *= v_darken;
     
     outColor = vec4(color, 1.);
 }

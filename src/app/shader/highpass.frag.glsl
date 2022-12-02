@@ -20,16 +20,15 @@ float windowCubic(float x, float center, float radius) {
 	return 1.0 - x * x * (3.0 - 2.0 * x);
 }
 
-vec4 sampleHalo(in vec2 uv, in float radius, in float aspectRatio, in float threshold) {
-	vec2 haloVec = vec2(0.5) - uv;
-    haloVec.x /= aspectRatio;
-    haloVec = normalize(haloVec);
-    haloVec.x *= aspectRatio;
-    vec2 wuv = (uv - vec2(0.5, 0.0)) / vec2(aspectRatio, 1.0) + vec2(0.5, 0.0);
-    float haloWeight = distance(wuv, vec2(0.5));
-    haloWeight = windowCubic(haloWeight, radius, 0.01);
-	haloVec *= radius;
-	return applyThreshold(texture(u_colorTexture, uv + haloVec), threshold) * haloWeight;
+vec4 sampleHalo(in vec2 uv, in float radius, in vec2 aspect, in float threshold) {
+    vec2 off = .5 - uv;
+    off *= aspect;
+    off = normalize(off * .5);
+    off /= aspect;
+    off *= radius;
+    vec2 st = uv + off;
+    float mask = windowCubic(length((2. * uv - 1.) * aspect), radius * 2., 0.1);
+    return applyThreshold(texture(u_colorTexture, st), threshold) * mask;
 }
 
 void main() {
@@ -37,12 +36,13 @@ void main() {
     vec2 texel = 1. / texSize;
 
     float haloThreshold = 0.3;
-    float haloRadius = 0.6;
-    vec2 shift = vec2(texel.x, 0.) * 50.;
-    float haloR = sampleHalo(v_uv - shift, haloRadius, texSize.y / texSize.x, haloThreshold).r;
-    float haloG = sampleHalo(v_uv, haloRadius, texSize.y / texSize.x, haloThreshold).g;
-    float haloB = sampleHalo(v_uv + shift, haloRadius, texSize.y / texSize.x, haloThreshold).b;
+    float haloRadius = .7;
+    vec2 aspect = texSize / min(texSize.y, texSize.x);
+    float shift = min(texel.x, texel.y) * 30.;
+    float haloR = sampleHalo(v_uv, haloRadius - shift * 3., aspect, haloThreshold).r;
+    float haloG = sampleHalo(v_uv, haloRadius - shift * 2., aspect, haloThreshold).g;
+    float haloB = sampleHalo(v_uv, haloRadius - shift, aspect, haloThreshold).b;
     vec4 halo = vec4(haloR, haloG, haloB, 0.);
 
-    outColor = applyThreshold(texture(u_colorTexture, v_uv), 0.4) * 200. + halo * 2000.;
+    outColor = applyThreshold(texture(u_colorTexture, v_uv), 0.4) * 200. + halo * 5.;
 }

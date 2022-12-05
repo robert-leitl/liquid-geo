@@ -14,14 +14,17 @@ export class AudioRepeater {
         this.isDev = isDev;
         this.pane = pane;
         this.recordBtnElm = recordBtnElm;
+        this.recordBtnLabelElm = recordBtnElm.querySelector('label');
         this.playbackBtnElm = playbackBtnElm;
+        this.playbackBtnLabelElm = playbackBtnElm.querySelector('label');
+        this.playbackBtnElm.setAttribute('disabled', true);
 
         this.init();
     }
 
     init() {
-        this.recordBtnElm.innerHTML = 'START REC';
-        this.playbackBtnElm.innerHTML = 'PLAY';
+        this.recordBtnLabelElm.innerHTML = 'RECORD';
+        this.playbackBtnLabelElm.innerHTML = 'PLAY';
         this.playbackBtnElm.setAttribute('disabled', true);
 
         this.recordBtnElm.addEventListener('click', () => this.onRecordButtonClicked());
@@ -84,8 +87,9 @@ export class AudioRepeater {
             this.audio.pause();
         }
 
+        this.recordBtnElm.classList.add('is-recording');
         this.playbackBtnElm.setAttribute('disabled', true);
-        this.recordBtnElm.innerHTML = 'STOP REC';
+        this.recordBtnLabelElm.innerHTML = 'STOP';
         this.isRecording = true;
         this.audioChunks = [];
 
@@ -113,9 +117,10 @@ export class AudioRepeater {
     }
 
     stopRecording() {
+        this.recordBtnElm.classList.remove('is-recording');
         this.playbackBtnElm.removeAttribute('disabled');
         this.isRecording = false;
-        this.recordBtnElm.innerHTML = 'START REC';
+        this.recordBtnLabelElm.innerHTML = 'RECORD';
         clearTimeout(this.isRecordingTimeoutId);
         this.mediaRecorder.stop();
     }

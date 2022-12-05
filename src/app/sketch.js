@@ -663,7 +663,7 @@ export class Sketch {
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
 
         if (this.isDev) {
-            const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
+            /*const maxViewportSide = Math.max(this.viewportSize[0], this.viewportSize[1]);
             // draw helper view of particle texture
             twgl.bindFramebufferInfo(gl, null);
             gl.viewport(0, 0, this.viewportSize[0] / 4, this.viewportSize[1] / 4);
@@ -673,7 +673,7 @@ export class Sketch {
             twgl.setUniforms(this.testPrg, { 
                 u_texture: this.highpassTexture
             });
-            twgl.drawBufferInfo(gl, this.quadBufferInfo);
+            twgl.drawBufferInfo(gl, this.quadBufferInfo);*/
         }
     }
 

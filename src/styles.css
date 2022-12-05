@@ -52,13 +52,11 @@ canvas {
     align-items: center;
     justify-content: center;
     padding: 3em 0;
-}
-
-.audio-controls button + button {
-    margin-left: 1em;
+    pointer-events: none;
 }
 
 .audio-controls button {
+    pointer-events: all;
     cursor: pointer;
     background: none;
     border: 2px solid #eee;
@@ -66,7 +64,9 @@ canvas {
     display: flex;
     align-items: center;
     padding: 0.75rem 1.25rem;
-    height: 4em;
+    min-height: 5em;
+    width: 17em;
+    justify-content: center;
 }
 
 .audio-controls button:hover {
@@ -89,6 +89,28 @@ canvas {
     width: 2rem;
     margin-right: 0.5rem;
     pointer-events: none;
+}
+
+@media (min-aspect-ratio: 7/5) {
+    .audio-controls {
+        flex-direction: column;
+        height: 100%;
+        padding: 0 2em;
+        align-items: flex-end;
+    }
+
+    .audio-controls button + button {
+        margin-top: 1em;
+    }
+}
+
+.audio-controls button + button {
+    margin-left: 1em;
+}
+
+#playback-button svg {
+    width: 1.7rem;
+    height: 1.7rem;
 }
 
 #record-button.is-recording::before {

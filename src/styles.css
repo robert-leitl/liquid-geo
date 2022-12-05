@@ -63,9 +63,8 @@ canvas {
     border-radius: 10rem;
     display: flex;
     align-items: center;
-    padding: 0.75rem 1.25rem;
-    min-height: 5em;
-    width: 17em;
+    min-height: 4em;
+    width: 16em;
     justify-content: center;
 }
 
@@ -101,6 +100,17 @@ canvas {
 
     .audio-controls button + button {
         margin-top: 1em;
+    }
+}
+
+@media (max-aspect-ratio: 5/8) {
+    .audio-controls {
+        flex-direction: column;
+    }
+
+    .audio-controls button + button {
+        margin-top: 1em;
+        margin-left: 0 !important;
     }
 }
 

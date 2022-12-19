@@ -63,9 +63,15 @@ canvas {
     border-radius: 10rem;
     display: flex;
     align-items: center;
-    min-height: 4em;
+    min-height: 4.25em;
     width: 16em;
     justify-content: center;
+}
+
+@media screen and (min-width: 641px) {
+    .audio-controls button {
+        min-height: 6em;
+    }
 }
 
 .audio-controls button:hover {

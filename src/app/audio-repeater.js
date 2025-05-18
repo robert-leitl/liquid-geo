@@ -81,7 +81,7 @@ export class AudioRepeater {
             await this.startRecording();
         }
     }
-    
+
     async startRecording() {
         if (this.audio) {
             this.audio.pause();
@@ -132,7 +132,7 @@ export class AudioRepeater {
             } else {
                 this.buffer.fill(0);
             }
-    
+
             if (this.buffer) {
                 for(let i=0; i<this.buffer.length; ++i) {
                     let targetValue = this.buffer[i] / 255;

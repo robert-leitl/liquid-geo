@@ -22,6 +22,7 @@ import blurVert from './shader/blur.vert.glsl';
 import blurFrag from './shader/blur.frag.glsl';
 import compositeVert from './shader/composite.vert.glsl';
 import compositeFrag from './shader/composite.frag.glsl';
+import {isIOS} from './is-ios.js';
 
 export class Sketch {
 
@@ -78,7 +79,7 @@ export class Sketch {
             inversViewProjection: mat4.create()
         }
     };
-    
+
     light = {
         matrix: mat4.create(),
         position: vec3.scale(vec3.create(), vec3.normalize(vec3.create(), vec3.fromValues(1, 1, 1)), 6),
@@ -137,12 +138,12 @@ export class Sketch {
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
             if (this.highpassFBO) {
-                twgl.resizeFramebufferInfo(gl, this.highpassFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+                twgl.resizeFramebufferInfo(gl, this.highpassFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}],
                     this.viewportSize[0] * this.SS_FX_SCALE, this.viewportSize[1] * this.SS_FX_SCALE);
             }
 
             if (this.blurFBO) {
-                twgl.resizeFramebufferInfo(gl, this.blurFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+                twgl.resizeFramebufferInfo(gl, this.blurFBO, [{attachmentPoint: gl.COLOR_ATTACHMENT0}],
                     this.viewportSize[0] * this.SS_FX_SCALE, this.viewportSize[1] * this.SS_FX_SCALE);
             }
 
@@ -200,7 +201,7 @@ export class Sketch {
         await this.glbBuilder.load(new URL('../assets/bead.glb', import.meta.url));
         this.beadPrimitive = this.glbBuilder.getPrimitiveDataByMeshName('bead');
         this.beadBuffers = this.beadPrimitive.buffers;
-        this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, { 
+        this.beadBufferInfo = twgl.createBufferInfoFromArrays(gl, {
             a_position: {...this.beadBuffers.vertices, numComponents: this.beadBuffers.vertices.numberOfComponents},
             a_normal: {...this.beadBuffers.normals, numComponents: this.beadBuffers.normals.numberOfComponents},
             a_texcoord: {...this.beadBuffers.texcoords, numComponents: this.beadBuffers.texcoords.numberOfComponents},
@@ -215,25 +216,25 @@ export class Sketch {
         this.inFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position1},{attachment: this.textures.velocity1}], this.textureSize, this.textureSize);
         this.outFBO = twgl.createFramebufferInfo(gl, [{attachment: this.textures.position2},{attachment: this.textures.velocity2}], this.textureSize, this.textureSize);
         this.lightDepthFBO = twgl.createFramebufferInfo(gl, [{
-            attachmentPoint: gl.DEPTH_ATTACHMENT, 
+            attachmentPoint: gl.DEPTH_ATTACHMENT,
             attachment: this.lightDepthTexture
         }], this.light.textureSize, this.light.textureSize);
         this.drawFBOAttachements = [
-            {format: gl.RGBA, internalFormat: gl.RGBA32F}, 
+            {format: gl.RGBA, internalFormat: gl.RGBA32F, min: isIOS ? gl.NEAREST : gl.LINEAR, mag: isIOS ? gl.NEAREST : gl.LINEAR},
             {attachmentPoint: gl.DEPTH_ATTACHMENT, format: gl.DEPTH_COMPONENT, internalFormat: gl.DEPTH_COMPONENT32F}
         ];
         this.drawFBO = twgl.createFramebufferInfo(gl, this.drawFBOAttachements, this.viewportSize[0], this.viewportSize[1]);
         this.colorTexture = this.drawFBO.attachments[0];
         this.highpassFBO = twgl.createFramebufferInfo(
-            gl, 
-            [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+            gl,
+            [{attachmentPoint: gl.COLOR_ATTACHMENT0}],
             this.viewportSize[0] * this.SS_FX_SCALE,
             this.viewportSize[1] * this.SS_FX_SCALE
         );
         this.highpassTexture = this.highpassFBO.attachments[0];
         this.blurFBO = twgl.createFramebufferInfo(
-            gl, 
-            [{attachmentPoint: gl.COLOR_ATTACHMENT0}], 
+            gl,
+            [{attachmentPoint: gl.COLOR_ATTACHMENT0}],
             this.viewportSize[0] * this.SS_FX_SCALE,
             this.viewportSize[1] * this.SS_FX_SCALE
         );
@@ -333,7 +334,7 @@ export class Sketch {
         const defaultOptions = {
             width: this.textureSize,
             height: this.textureSize,
-            min: gl.NEAREST, 
+            min: gl.NEAREST,
             mag: gl.NEAREST,
             wrap: gl.REPEAT
         }
@@ -341,14 +342,14 @@ export class Sketch {
         const defaultVectorTexOptions = {
             ...defaultOptions,
             format: gl.RGBA,
-            internalFormat: gl.RGBA32F, 
+            internalFormat: gl.RGBA32F,
         }
 
-        this.textures = twgl.createTextures(gl, { 
+        this.textures = twgl.createTextures(gl, {
             densityPressure: {
                 ...defaultOptions,
-                format: gl.RG, 
-                internalFormat: gl.RG32F, 
+                format: gl.RG,
+                internalFormat: gl.RG32F,
                 src: new Float32Array(this.NUM_PARTICLES * 2)
             },
             force: { ...defaultVectorTexOptions, src: [...initForces] },
@@ -369,7 +370,7 @@ export class Sketch {
                 format: gl.RED,
                 internalFormat: gl.R32F,
                 type: gl.FLOAT,
-                minMag: gl.LINEAR
+                minMag: isIOS ? gl.NEAREST : gl.LINEAR
             }
         );
 
@@ -429,7 +430,7 @@ export class Sketch {
         mat4.targetTo(this.light.matrix, this.light.position, [0, 0, 0], this.light.up);
         mat4.invert(this.light.matrices.view, this.light.matrix);
         mat4.ortho(
-            this.light.matrices.projection, 
+            this.light.matrices.projection,
             -this.light.size / 2,
             this.light.size / 2,
             -this.light.size / 2,
@@ -457,7 +458,7 @@ export class Sketch {
         } else {
             this.leftSphere = true;
         }
-        
+
 
         this.arcPointerDelta = vec3.subtract(this.arcPointerDelta, this.arcPointer, this.arcPointerPrev);
         vec3.copy(this.arcPointerPrev, this.arcPointer);
@@ -488,7 +489,7 @@ export class Sketch {
         gl.useProgram(this.pressurePrg.program);
         twgl.bindFramebufferInfo(gl, this.pressureFBO);
         gl.bindVertexArray(this.quadVAO);
-        twgl.setUniforms(this.pressurePrg, { 
+        twgl.setUniforms(this.pressurePrg, {
             u_positionTexture: this.inFBO.attachments[0]
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
@@ -497,9 +498,9 @@ export class Sketch {
         // calculate pressure-, viscosity- and boundary forces for every particle
         gl.useProgram(this.forcePrg.program);
         twgl.bindFramebufferInfo(gl, this.forceFBO);
-        twgl.setUniforms(this.forcePrg, { 
+        twgl.setUniforms(this.forcePrg, {
             u_densityPressureTexture: this.pressureFBO.attachments[0],
-            u_positionTexture: this.inFBO.attachments[0], 
+            u_positionTexture: this.inFBO.attachments[0],
             u_velocityTexture: this.inFBO.attachments[1]
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
@@ -508,8 +509,8 @@ export class Sketch {
         gl.useProgram(this.integratePrg.program);
         twgl.bindFramebufferInfo(gl, this.outFBO);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        twgl.setUniforms(this.integratePrg, { 
-            u_positionTexture: this.inFBO.attachments[0], 
+        twgl.setUniforms(this.integratePrg, {
+            u_positionTexture: this.inFBO.attachments[0],
             u_velocityTexture: this.inFBO.attachments[1],
             u_forceTexture: this.forceFBO.attachments[0],
             u_densityPressureTexture: this.pressureFBO.attachments[0],
@@ -524,7 +525,7 @@ export class Sketch {
                 pointerStrength: this.pointerParams.STRENGTH,
                 pointerPos: this.arcPointer,
                 pointerVelocity: this.arcPointerDelta
-            } 
+            }
         );
         twgl.setUniformBlock(gl, this.integratePrg, this.pointerParamsUBO);
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
@@ -569,7 +570,7 @@ export class Sketch {
             format: gl.RED,
             internalFormat: gl.R32F,
             type: gl.FLOAT,
-            minMag: gl.LINEAR
+            minMag: isIOS ? gl.NEAREST : gl.LINEAR
         });
     }
 
@@ -637,7 +638,7 @@ export class Sketch {
         twgl.bindFramebufferInfo(gl, this.highpassFBO);
         gl.bindVertexArray(this.quadVAO);
         gl.useProgram(this.highpassPrg.program);
-        twgl.setUniforms(this.highpassPrg, { 
+        twgl.setUniforms(this.highpassPrg, {
             u_colorTexture: this.colorTexture
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
@@ -646,7 +647,7 @@ export class Sketch {
         twgl.bindFramebufferInfo(gl, this.blurFBO);
         gl.bindVertexArray(this.quadVAO);
         gl.useProgram(this.blurPrg.program);
-        twgl.setUniforms(this.blurPrg, { 
+        twgl.setUniforms(this.blurPrg, {
             u_colorTexture: this.highpassTexture
         });
         twgl.drawBufferInfo(gl, this.quadBufferInfo);
@@ -656,7 +657,7 @@ export class Sketch {
         gl.viewport(0, 0, this.viewportSize[0], this.viewportSize[1]);
         gl.bindVertexArray(this.quadVAO);
         gl.useProgram(this.compositePrg.program);
-        twgl.setUniforms(this.compositePrg, { 
+        twgl.setUniforms(this.compositePrg, {
             u_bloomTexture: this.blurTexture,
             u_colorTexture: this.colorTexture
         });
@@ -670,7 +671,7 @@ export class Sketch {
             gl.bindVertexArray(this.quadVAO);
             gl.disable(gl.DEPTH_TEST);
             gl.useProgram(this.testPrg.program);
-            twgl.setUniforms(this.testPrg, { 
+            twgl.setUniforms(this.testPrg, {
                 u_texture: this.highpassTexture
             });
             twgl.drawBufferInfo(gl, this.quadBufferInfo);*/
@@ -702,7 +703,7 @@ export class Sketch {
         // map to -1 to 1
         const x = (screenPos[0] / this.viewportSize[0]) * 2. - 1;
         const y = (1 - (screenPos[1] / this.viewportSize[1])) * 2. - 1;
-        
+
         // l(t) = p + t * u
         const p = this.#screenToWorldPosition(x, y, 0);
         const u = vec3.subtract(vec3.create(), p, this.camera.position);
@@ -715,7 +716,7 @@ export class Sketch {
         const a = 1;
         const d = b * b - 4 * a * c;
 
-        if (d < 0) { 
+        if (d < 0) {
             // No solution
             return null;
         } else {
@@ -732,7 +733,7 @@ export class Sketch {
     }
 
     #screenToWorldPosition(x, y, z) {
-        const ndcPos = vec3.fromValues(x, y, z); 
+        const ndcPos = vec3.fromValues(x, y, z);
         const worldPos = vec4.transformMat4(vec4.create(), vec4.fromValues(ndcPos[0], ndcPos[1], ndcPos[2], 1), this.camera.matrices.inversViewProjection);
         if (worldPos[3] !== 0){
             vec4.scale(worldPos, worldPos, 1 / worldPos[3]);
